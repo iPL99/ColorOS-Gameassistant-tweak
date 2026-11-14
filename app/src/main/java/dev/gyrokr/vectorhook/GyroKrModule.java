@@ -89,6 +89,7 @@ public class GyroKrModule extends XposedModule {
             );
 
             installPerformanceSettingHooks(loader);
+            installCosaNetworkParserHook(loader);
 
             return;
         }
@@ -324,7 +325,7 @@ public class GyroKrModule extends XposedModule {
 
     /*
      * ================================================================
-     * NEW: COSA PerformanceSetting hooks
+     * Existing COSA PerformanceSetting hooks
      * ================================================================
      */
 
@@ -421,6 +422,88 @@ public class GyroKrModule extends XposedModule {
                     LOG_ERROR,
                     TAG,
                     "PerformanceSetting hook ERROR: "
+                            + e
+            );
+        }
+    }
+
+    /*
+     * ================================================================
+     * NEW: COSA network response parser
+     *
+     * v8.e.d(String,String):HashMap
+     *
+     * First argument:
+     *     full network response JSON
+     *
+     * Second argument:
+     *     service / source string
+     * ================================================================
+     */
+
+    private void installCosaNetworkParserHook(
+            ClassLoader loader) {
+
+        try {
+
+            Class<?> clazz =
+                    loader.loadClass("v8.e");
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "v8.e FOUND"
+            );
+
+            Method target = null;
+
+            for (Method method : clazz.getDeclaredMethods()) {
+
+                if (
+                        "d".equals(method.getName())
+                        && method.getParameterCount() == 2
+                        && method.getParameterTypes()[0] == String.class
+                        && method.getParameterTypes()[1] == String.class
+                        && java.util.HashMap.class.isAssignableFrom(
+                                method.getReturnType()
+                        )
+                ) {
+
+                    target = method;
+                    break;
+                }
+            }
+
+            if (target == null) {
+
+                log(
+                        LOG_ERROR,
+                        TAG,
+                        "v8.e.d(String,String):HashMap NOT FOUND"
+                );
+
+                return;
+            }
+
+            target.setAccessible(true);
+
+            hook(target).intercept(
+                    new CosaNetworkParserHooker()
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "COSA NETWORK PARSER HOOK INSTALLED: "
+                            + target
+            );
+
+        } catch (Throwable e) {
+
+            log(
+                    LOG_ERROR,
+                    TAG,
+                    "COSA network parser hook ERROR: "
                             + e
             );
         }
@@ -604,7 +687,7 @@ public class GyroKrModule extends XposedModule {
 
     /*
      * ================================================================
-     * NEW: PerformanceSetting$a.a()
+     * Existing PerformanceSetting$a.a()
      * ================================================================
      */
 
@@ -655,7 +738,7 @@ public class GyroKrModule extends XposedModule {
 
     /*
      * ================================================================
-     * NEW: PerformanceSetting$a.d(String)
+     * Existing PerformanceSetting$a.d(String)
      * ================================================================
      */
 
@@ -723,6 +806,77 @@ public class GyroKrModule extends XposedModule {
 
     /*
      * ================================================================
+     * NEW: v8.e.d() hooker
+     * ================================================================
+     */
+
+    private class CosaNetworkParserHooker
+            implements XposedInterface.Hooker {
+
+        @Override
+        public Object intercept(
+                XposedInterface.Chain chain)
+                throws Throwable {
+
+            String response =
+                    String.valueOf(
+                            chain.getArg(0)
+                    );
+
+            String source =
+                    String.valueOf(
+                            chain.getArg(1)
+                    );
+
+            boolean targetHit =
+                    response.contains(
+                            TARGET_GAME
+                    );
+
+            if (targetHit) {
+
+                log(
+                        LOG_INFO,
+                        TAG,
+                        "COSA RESPONSE TARGET HIT"
+                );
+
+                log(
+                        LOG_INFO,
+                        TAG,
+                        "COSA RESPONSE = "
+                                + response
+                );
+
+                log(
+                        LOG_INFO,
+                        TAG,
+                        "COSA ARG1 = "
+                                + source
+                );
+            }
+
+            Object result =
+                    chain.proceed();
+
+            if (targetHit) {
+
+                log(
+                        LOG_INFO,
+                        TAG,
+                        "COSA PARSE RESULT = "
+                                + String.valueOf(
+                                        result
+                                )
+                );
+            }
+
+            return result;
+        }
+    }
+
+    /*
+     * ================================================================
      * PerformanceSetting$b reflection helper
      * ================================================================
      */
@@ -753,7 +907,7 @@ public class GyroKrModule extends XposedModule {
              *
              * PerformanceSetting$b.d : String
              *
-             * This is the touchCustomizedCapability field.
+             * touchCustomizedCapability
              */
 
             Field field =
@@ -766,7 +920,9 @@ public class GyroKrModule extends XposedModule {
 
             out.append("d=")
                     .append(
-                            String.valueOf(value)
+                            String.valueOf(
+                                    value
+                            )
                     );
 
             out.append(" }");
@@ -775,10 +931,10 @@ public class GyroKrModule extends XposedModule {
 
         } catch (Throwable e) {
 
-            return object.getClass().getName()
-                    + " { reflection-error="
+            return String.valueOf(object)
+                    + " [reflection error: "
                     + e
-                    + " }";
+                    + "]";
         }
     }
 }
