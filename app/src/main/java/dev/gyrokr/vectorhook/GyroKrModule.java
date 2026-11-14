@@ -1,7 +1,5 @@
 package dev.gyrokr.vectorhook;
 
-import android.util.Log;
-
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 
@@ -23,8 +21,7 @@ public class GyroKrModule extends XposedModule {
             "business.module.gyroscope.GyroscopeConfigFeature";
 
     public GyroKrModule() {
-        // 절대로 여기서 log() 호출하지 않음.
-        // Vector framework가 아직 attach되지 않은 상태일 수 있음.
+        // Constructor에서는 log() 호출 금지.
     }
 
     @Override
@@ -32,10 +29,19 @@ public class GyroKrModule extends XposedModule {
             XposedModuleInterface.ModuleLoadedParam param) {
 
         try {
-            log(TAG + " onModuleLoaded");
-            log(TAG + " Process = " + param.getProcessName());
-        } catch (Throwable e) {
-            Log.e(TAG, "onModuleLoaded failed", e);
+            log(
+                    XposedInterface.PRIORITY_INFO,
+                    TAG,
+                    "onModuleLoaded"
+            );
+
+            log(
+                    XposedInterface.PRIORITY_INFO,
+                    TAG,
+                    "Process = " + param.getProcessName()
+            );
+
+        } catch (Throwable ignored) {
         }
     }
 
@@ -43,29 +49,49 @@ public class GyroKrModule extends XposedModule {
     public void onPackageReady(
             XposedModuleInterface.PackageReadyParam param) {
 
-        String packageName = null;
-
         try {
-            packageName = param.getPackageName();
+            String packageName = param.getPackageName();
 
-            log(TAG + " onPackageReady: " + packageName);
+            log(
+                    XposedInterface.PRIORITY_INFO,
+                    TAG,
+                    "onPackageReady: " + packageName
+            );
 
             if (!GAME_SPACE_PACKAGE.equals(packageName)) {
                 return;
             }
 
-            log(TAG + " GameSpace detected");
+            log(
+                    XposedInterface.PRIORITY_INFO,
+                    TAG,
+                    "GameSpace detected"
+            );
 
             ClassLoader classLoader = param.getClassLoader();
 
-            log(TAG + " Package = " + packageName);
-            log(TAG + " ClassLoader = " + classLoader);
+            log(
+                    XposedInterface.PRIORITY_INFO,
+                    TAG,
+                    "Package = " + packageName
+            );
+
+            log(
+                    XposedInterface.PRIORITY_INFO,
+                    TAG,
+                    "ClassLoader = " + classLoader
+            );
 
             installGameSpaceGyroHook(classLoader);
 
         } catch (Throwable e) {
-            log(TAG + " onPackageReady exception: " + e);
-            Log.e(TAG, "onPackageReady failed", e);
+
+            log(
+                    XposedInterface.PRIORITY_ERROR,
+                    TAG,
+                    "onPackageReady exception",
+                    e
+            );
         }
     }
 
@@ -73,11 +99,6 @@ public class GyroKrModule extends XposedModule {
             ClassLoader classLoader) {
 
         try {
-            /*
-             * Current ColorOS 17 GameSpace:
-             *
-             * business.module.gyroscope.GyroscopeConfigFeature
-             */
 
             Class<?> featureClass = Class.forName(
                     GYRO_CLASS,
@@ -85,20 +106,35 @@ public class GyroKrModule extends XposedModule {
                     classLoader
             );
 
-            log(TAG + " GyroscopeConfigFeature FOUND");
-            log(TAG + " Class = " + featureClass.getName());
+            log(
+                    XposedInterface.PRIORITY_INFO,
+                    TAG,
+                    "GyroscopeConfigFeature FOUND"
+            );
 
-            Method[] methods = featureClass.getDeclaredMethods();
+            log(
+                    XposedInterface.PRIORITY_INFO,
+                    TAG,
+                    "Class = " + featureClass.getName()
+            );
 
-            log(TAG + " Method count = " + methods.length);
+            Method[] methods =
+                    featureClass.getDeclaredMethods();
+
+            log(
+                    XposedInterface.PRIORITY_INFO,
+                    TAG,
+                    "Method count = " + methods.length
+            );
 
             Method targetMethod = null;
 
             for (Method method : methods) {
 
                 log(
-                        TAG
-                                + " Method: "
+                        XposedInterface.PRIORITY_INFO,
+                        TAG,
+                        "Method: "
                                 + method.getName()
                                 + " "
                                 + method.toGenericString()
@@ -106,8 +142,10 @@ public class GyroKrModule extends XposedModule {
 
                 if ("s".equals(method.getName())
                         && method.getParameterTypes().length == 1
-                        && method.getParameterTypes()[0] == String.class
-                        && method.getReturnType() == boolean.class) {
+                        && method.getParameterTypes()[0]
+                                == String.class
+                        && method.getReturnType()
+                                == boolean.class) {
 
                     targetMethod = method;
                     break;
@@ -116,45 +154,65 @@ public class GyroKrModule extends XposedModule {
 
             if (targetMethod == null) {
 
-                log(TAG + " Method s(String):boolean NOT FOUND");
+                log(
+                        XposedInterface.PRIORITY_ERROR,
+                        TAG,
+                        "Method s(String):boolean NOT FOUND"
+                );
 
                 return;
             }
 
-            log(TAG + " Found gate method:");
-            log(TAG + " " + targetMethod.toGenericString());
+            log(
+                    XposedInterface.PRIORITY_INFO,
+                    TAG,
+                    "Found gate method: "
+                            + targetMethod.toGenericString()
+            );
 
-            if (!Modifier.isStatic(targetMethod.getModifiers())) {
-                log(TAG + " Method s() is NOT static");
+            if (Modifier.isStatic(
+                    targetMethod.getModifiers())) {
+
+                log(
+                        XposedInterface.PRIORITY_INFO,
+                        TAG,
+                        "Method s() is static"
+                );
+
             } else {
-                log(TAG + " Method s() is static");
+
+                log(
+                        XposedInterface.PRIORITY_INFO,
+                        TAG,
+                        "Method s() is NOT static"
+                );
             }
 
             targetMethod.setAccessible(true);
 
-            hook(
-                    targetMethod
-            ).intercept(
-                    new GyroGateHooker()
-            );
+            hook(targetMethod)
+                    .intercept(new GyroGateHooker());
 
-            log(TAG + " GameSpace gyro hook INSTALLED");
+            log(
+                    XposedInterface.PRIORITY_INFO,
+                    TAG,
+                    "GameSpace gyro hook INSTALLED"
+            );
 
         } catch (ClassNotFoundException e) {
 
             log(
-                    TAG
-                            + " GyroscopeConfigFeature NOT FOUND: "
-                            + GYRO_CLASS
+                    XposedInterface.PRIORITY_ERROR,
+                    TAG,
+                    "GyroscopeConfigFeature NOT FOUND: "
+                            + GYRO_CLASS,
+                    e
             );
-
-            Log.e(TAG, "GyroscopeConfigFeature not found", e);
 
         } catch (Throwable e) {
 
-            log(TAG + " Failed to install GameSpace gyro hook");
-
-            Log.e(
+            log(
+                    XposedInterface.PRIORITY_ERROR,
                     TAG,
                     "Failed to install GameSpace gyro hook",
                     e
@@ -176,19 +234,23 @@ public class GyroKrModule extends XposedModule {
 
                 if (arg0 instanceof String) {
 
-                    String packageName = (String) arg0;
+                    String packageName =
+                            (String) arg0;
 
-                    if (TARGET_GAME_PACKAGE.equals(packageName)) {
+                    log(
+                            XposedInterface.PRIORITY_INFO,
+                            TAG,
+                            "Gyro gate called: "
+                                    + packageName
+                    );
+
+                    if (TARGET_GAME_PACKAGE
+                            .equals(packageName)) {
 
                         log(
-                                TAG
-                                        + " Gyro gate intercepted: "
-                                        + packageName
-                        );
-
-                        log(
-                                TAG
-                                        + " Returning TRUE for "
+                                XposedInterface.PRIORITY_INFO,
+                                TAG,
+                                "Returning TRUE for "
                                         + TARGET_GAME_PACKAGE
                         );
 
@@ -199,14 +261,9 @@ public class GyroKrModule extends XposedModule {
             } catch (Throwable e) {
 
                 log(
-                        TAG
-                                + " GyroGateHooker exception: "
-                                + e
-                );
-
-                Log.e(
+                        XposedInterface.PRIORITY_ERROR,
                         TAG,
-                        "GyroGateHooker failed",
+                        "GyroGateHooker exception",
                         e
                 );
             }
