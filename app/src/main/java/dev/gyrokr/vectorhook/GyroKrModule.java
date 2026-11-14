@@ -2,7 +2,6 @@ package dev.gyrokr.vectorhook;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
-import java.util.Arrays;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
@@ -18,11 +17,8 @@ public class GyroKrModule extends XposedModule {
     private static final int LOG_INFO = 4;
     private static final int LOG_ERROR = 6;
 
-    public GyroKrModule(
-            XposedInterface base,
-            XposedModuleInterface.ModuleLoadedParam param
-    ) {
-        super(base, param);
+    public GyroKrModule() {
+        super();
     }
 
     @Override
@@ -67,6 +63,7 @@ public class GyroKrModule extends XposedModule {
             int installed = 0;
 
             for (Method method : clazz.getDeclaredMethods()) {
+
                 if (!method.getName().equals("r")
                         && !method.getName().equals("s")) {
                     continue;
@@ -79,6 +76,7 @@ public class GyroKrModule extends XposedModule {
                 }
 
                 hook(method).intercept(new GyroGateHooker());
+
                 installed++;
 
                 log(
@@ -95,7 +93,12 @@ public class GyroKrModule extends XposedModule {
             );
 
         } catch (Throwable t) {
-            log(LOG_ERROR, TAG, "Gyroscope hook error", t);
+            log(
+                    LOG_ERROR,
+                    TAG,
+                    "Gyroscope hook error",
+                    t
+            );
         }
     }
 
@@ -112,6 +115,7 @@ public class GyroKrModule extends XposedModule {
             int installed = 0;
 
             for (Method method : clazz.getDeclaredMethods()) {
+
                 String name = method.getName();
 
                 if (!name.toLowerCase().contains("touch")) {
@@ -128,7 +132,9 @@ public class GyroKrModule extends XposedModule {
                 }
 
                 try {
-                    hook(method).intercept(new TouchTraceHooker());
+                    hook(method).intercept(
+                            new TouchTraceHooker()
+                    );
 
                     installed++;
 
@@ -155,7 +161,12 @@ public class GyroKrModule extends XposedModule {
             );
 
         } catch (Throwable t) {
-            log(LOG_ERROR, TAG, "Touch hook error", t);
+            log(
+                    LOG_ERROR,
+                    TAG,
+                    "Touch hook error",
+                    t
+            );
         }
     }
 
@@ -170,16 +181,13 @@ public class GyroKrModule extends XposedModule {
             Method target = null;
 
             for (Method method : clazz.getDeclaredMethods()) {
-                if (!method.getName().equals("getSupportFeatureList")) {
+
+                if (!method.getName().equals(
+                        "getSupportFeatureList")) {
                     continue;
                 }
 
                 if (method.getParameterCount() != 0) {
-                    continue;
-                }
-
-                if (!java.util.List.class.isAssignableFrom(
-                        method.getReturnType())) {
                     continue;
                 }
 
@@ -196,7 +204,9 @@ public class GyroKrModule extends XposedModule {
                 return;
             }
 
-            hook(target).intercept(new FeatureListHooker());
+            hook(target).intercept(
+                    new FeatureListHooker()
+            );
 
             log(
                     LOG_INFO,
@@ -205,23 +215,33 @@ public class GyroKrModule extends XposedModule {
             );
 
         } catch (Throwable t) {
-            log(LOG_ERROR, TAG, "Feature list hook error", t);
+            log(
+                    LOG_ERROR,
+                    TAG,
+                    "Feature list hook error",
+                    t
+            );
         }
     }
 
-    private class GyroGateHooker implements XposedInterface.Hooker {
+    private class GyroGateHooker
+            implements XposedInterface.Hooker {
 
         @Override
-        public Object intercept(XposedInterface.Chain chain)
-                throws Throwable {
+        public Object intercept(
+                XposedInterface.Chain chain
+        ) throws Throwable {
 
             Object arg = chain.getArg(0);
 
-            if (TARGET_GAME.equals(String.valueOf(arg))) {
+            if (TARGET_GAME.equals(
+                    String.valueOf(arg))) {
+
                 log(
                         LOG_INFO,
                         TAG,
-                        "Gyroscope support forced TRUE for " + TARGET_GAME
+                        "Gyroscope support forced TRUE for "
+                                + TARGET_GAME
                 );
 
                 return Boolean.TRUE;
@@ -231,23 +251,26 @@ public class GyroKrModule extends XposedModule {
         }
     }
 
-    private class TouchTraceHooker implements XposedInterface.Hooker {
+    private class TouchTraceHooker
+            implements XposedInterface.Hooker {
 
         @Override
-        public Object intercept(XposedInterface.Chain chain)
-                throws Throwable {
+        public Object intercept(
+                XposedInterface.Chain chain
+        ) throws Throwable {
 
-            Method method = chain.getExecutable() instanceof Method
-                    ? (Method) chain.getExecutable()
-                    : null;
+            Method method =
+                    (Method) chain.getExecutable();
 
-            String name = method != null
-                    ? method.getName()
-                    : "unknown";
+            String name = method.getName();
 
-            StringBuilder args = new StringBuilder();
+            StringBuilder args =
+                    new StringBuilder();
 
-            for (int i = 0; i < method.getParameterCount(); i++) {
+            for (int i = 0;
+                 i < method.getParameterCount();
+                 i++) {
+
                 if (i > 0) {
                     args.append(", ");
                 }
@@ -255,13 +278,21 @@ public class GyroKrModule extends XposedModule {
                 args.append("arg")
                         .append(i)
                         .append("=")
-                        .append(String.valueOf(chain.getArg(i)));
+                        .append(
+                                String.valueOf(
+                                        chain.getArg(i)
+                                )
+                        );
             }
 
             log(
                     LOG_INFO,
                     TAG,
-                    "TOUCH CALL: " + name + "(" + args + ")"
+                    "TOUCH CALL: "
+                            + name
+                            + "("
+                            + args
+                            + ")"
             );
 
             Object result = chain.proceed();
@@ -269,23 +300,29 @@ public class GyroKrModule extends XposedModule {
             log(
                     LOG_INFO,
                     TAG,
-                    "TOUCH RESULT: " + name + " = " + result
+                    "TOUCH RESULT: "
+                            + name
+                            + " = "
+                            + result
             );
 
             return result;
         }
     }
 
-    private class FeatureListHooker implements XposedInterface.Hooker {
+    private class FeatureListHooker
+            implements XposedInterface.Hooker {
 
         @Override
-        public Object intercept(XposedInterface.Chain chain)
-                throws Throwable {
+        public Object intercept(
+                XposedInterface.Chain chain
+        ) throws Throwable {
 
             log(
                     LOG_INFO,
                     TAG,
-                    "FEATURE LIST CALL: getSupportFeatureList()"
+                    "FEATURE LIST CALL: "
+                            + "getSupportFeatureList()"
             );
 
             Object result = chain.proceed();
@@ -293,17 +330,25 @@ public class GyroKrModule extends XposedModule {
             log(
                     LOG_INFO,
                     TAG,
-                    "FEATURE LIST RESULT: " + String.valueOf(result)
+                    "FEATURE LIST RESULT: "
+                            + String.valueOf(result)
             );
 
             if (result instanceof java.util.List) {
-                java.util.List<?> list = (java.util.List<?>) result;
+
+                java.util.List<?> list =
+                        (java.util.List<?>) result;
+
+                boolean multiTouch =
+                        list.contains(
+                                "command_multi_touch_rate"
+                        );
 
                 log(
                         LOG_INFO,
                         TAG,
                         "MULTI TOUCH RATE SUPPORTED = "
-                                + list.contains("command_multi_touch_rate")
+                                + multiTouch
                 );
             }
 
