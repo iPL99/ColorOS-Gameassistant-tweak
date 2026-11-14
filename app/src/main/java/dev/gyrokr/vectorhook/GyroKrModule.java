@@ -25,6 +25,57 @@ public final class GyroKrModule extends XposedModule {
     private static final String GATE_METHOD =
             "s";
 
+    @Override
+    public void onModuleLoaded(
+            XposedModuleInterface.ModuleLoadedParam param) {
+
+        log(
+                Log.INFO,
+                TAG,
+                "================================"
+        );
+
+        log(
+                Log.INFO,
+                TAG,
+                "OplusGyroKR onModuleLoaded"
+        );
+
+        log(
+                Log.INFO,
+                TAG,
+                "Process = "
+                        + param.getProcessName()
+        );
+
+        log(
+                Log.INFO,
+                TAG,
+                "Framework = "
+                        + param.getFrameworkName()
+        );
+
+        log(
+                Log.INFO,
+                TAG,
+                "FrameworkVersion = "
+                        + param.getFrameworkVersion()
+        );
+
+        log(
+                Log.INFO,
+                TAG,
+                "ApiVersion = "
+                        + param.getApiVersion()
+        );
+
+        log(
+                Log.INFO,
+                TAG,
+                "================================"
+        );
+    }
+
     private final class GyroGateHooker
             implements XposedInterface.Hooker {
 
