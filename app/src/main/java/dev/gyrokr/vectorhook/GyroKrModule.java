@@ -71,7 +71,8 @@ public class GyroKrModule extends XposedModule {
                     "GameSpace detected"
             );
 
-            ClassLoader classLoader = param.getClassLoader();
+            ClassLoader classLoader =
+                    param.getClassLoader();
 
             log(
                     LOG_INFO,
@@ -231,44 +232,37 @@ public class GyroKrModule extends XposedModule {
                 XposedInterface.Chain chain)
                 throws Throwable {
 
-            try {
+            Object arg0 = chain.getArg(0);
 
-                Object arg0 = chain.getArg(0);
+            if (arg0 instanceof String) {
 
-                if (arg0 instanceof String) {
+                String packageName =
+                        (String) arg0;
 
-                    String packageName =
-                            (String) arg0;
+                if (TARGET_GAME_PACKAGE.equals(packageName)) {
+
+                    Object originalResult =
+                            chain.proceed();
 
                     log(
                             LOG_INFO,
                             TAG,
-                            "Gyro gate called: "
+                            "s("
                                     + packageName
+                                    + ") ORIGINAL = "
+                                    + originalResult
                     );
 
-                    if (TARGET_GAME_PACKAGE
-                            .equals(packageName)) {
+                    log(
+                            LOG_INFO,
+                            TAG,
+                            "s("
+                                    + packageName
+                                    + ") FORCED = true"
+                    );
 
-                        log(
-                                LOG_INFO,
-                                TAG,
-                                "Returning TRUE for "
-                                        + TARGET_GAME_PACKAGE
-                        );
-
-                        return Boolean.TRUE;
-                    }
+                    return Boolean.TRUE;
                 }
-
-            } catch (Throwable e) {
-
-                log(
-                        LOG_ERROR,
-                        TAG,
-                        "GyroGateHooker exception",
-                        e
-                );
             }
 
             return chain.proceed();
