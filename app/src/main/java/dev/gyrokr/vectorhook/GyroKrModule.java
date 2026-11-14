@@ -135,11 +135,8 @@ public class GyroKrModule extends XposedModule {
 
                     method.setAccessible(true);
 
-                    hook(
-                            method,
-                            new GyroGateHooker(
-                                    "r"
-                            )
+                    hook(method).intercept(
+                            new GyroGateHooker("r")
                     );
 
                     log(
@@ -164,11 +161,8 @@ public class GyroKrModule extends XposedModule {
 
                     method.setAccessible(true);
 
-                    hook(
-                            method,
-                            new GyroGateHooker(
-                                    "s"
-                            )
+                    hook(method).intercept(
+                            new GyroGateHooker("s")
                     );
 
                     log(
@@ -227,24 +221,21 @@ public class GyroKrModule extends XposedModule {
                     continue;
                 }
 
-                /*
-                 * Static methods are skipped.
-                 */
                 if (Modifier.isStatic(method.getModifiers())) {
                     continue;
                 }
 
                 method.setAccessible(true);
 
-                hook(
-                        method,
+                hook(method).intercept(
                         new TouchTraceHooker()
                 );
 
                 log(
                         LOG_INFO,
                         TAG,
-                        "TOUCH HOOK INSTALLED: " + method.getName()
+                        "TOUCH HOOK INSTALLED: "
+                                + method.getName()
                 );
 
                 installed++;
@@ -253,7 +244,8 @@ public class GyroKrModule extends XposedModule {
             log(
                     LOG_INFO,
                     TAG,
-                    "ALL TOUCH HOOKS INSTALLED = " + installed
+                    "ALL TOUCH HOOKS INSTALLED = "
+                            + installed
             );
 
         } catch (Throwable e) {
@@ -309,15 +301,15 @@ public class GyroKrModule extends XposedModule {
 
             target.setAccessible(true);
 
-            hook(
-                    target,
+            hook(target).intercept(
                     new FeatureListHooker()
             );
 
             log(
                     LOG_INFO,
                     TAG,
-                    "FEATURE LIST HOOK INSTALLED: " + target
+                    "FEATURE LIST HOOK INSTALLED: "
+                            + target
             );
 
         } catch (Throwable e) {
@@ -353,14 +345,14 @@ public class GyroKrModule extends XposedModule {
 
             int installed = 0;
 
-            /*
-             * a(
-             *   PerformanceSetting$b,
-             *   String
-             * ): PerformanceSetting$b
-             */
             for (Method method : clazz.getDeclaredMethods()) {
 
+                /*
+                 * a(
+                 *   PerformanceSetting$b,
+                 *   String
+                 * ): PerformanceSetting$b
+                 */
                 if (
                         "a".equals(method.getName())
                         && method.getParameterCount() == 2
@@ -372,15 +364,15 @@ public class GyroKrModule extends XposedModule {
 
                     method.setAccessible(true);
 
-                    hook(
-                            method,
+                    hook(method).intercept(
                             new PerformanceSettingAHooker()
                     );
 
                     log(
                             LOG_INFO,
                             TAG,
-                            "PERFORMANCE HOOK INSTALLED: " + method
+                            "PERFORMANCE HOOK INSTALLED: "
+                                    + method
                     );
 
                     installed++;
@@ -401,15 +393,15 @@ public class GyroKrModule extends XposedModule {
 
                     method.setAccessible(true);
 
-                    hook(
-                            method,
+                    hook(method).intercept(
                             new PerformanceSettingDHooker()
                     );
 
                     log(
                             LOG_INFO,
                             TAG,
-                            "PERFORMANCE d() HOOK INSTALLED: " + method
+                            "PERFORMANCE d() HOOK INSTALLED: "
+                                    + method
                     );
 
                     installed++;
@@ -428,14 +420,15 @@ public class GyroKrModule extends XposedModule {
             log(
                     LOG_ERROR,
                     TAG,
-                    "PerformanceSetting hook ERROR: " + e
+                    "PerformanceSetting hook ERROR: "
+                            + e
             );
         }
     }
 
     /*
      * ================================================================
-     * Gyroscope hook
+     * Existing Gyroscope hooker
      * ================================================================
      */
 
@@ -455,14 +448,20 @@ public class GyroKrModule extends XposedModule {
 
             Object arg = null;
 
-            if (chain.getExecutable().getParameterCount() > 0) {
+            if (
+                    chain.getExecutable()
+                            .getParameterCount() > 0
+            ) {
+
                 arg = chain.getArg(0);
             }
 
             String packageName =
                     String.valueOf(arg);
 
-            if (TARGET_GAME.equals(packageName)) {
+            if (
+                    TARGET_GAME.equals(packageName)
+            ) {
 
                 log(
                         LOG_INFO,
@@ -483,7 +482,7 @@ public class GyroKrModule extends XposedModule {
 
     /*
      * ================================================================
-     * Touch trace hook
+     * Existing Touch trace hooker
      * ================================================================
      */
 
@@ -552,7 +551,7 @@ public class GyroKrModule extends XposedModule {
 
     /*
      * ================================================================
-     * Feature list hook
+     * Existing Feature list hooker
      * ================================================================
      */
 
@@ -607,21 +606,6 @@ public class GyroKrModule extends XposedModule {
      * ================================================================
      * NEW: PerformanceSetting$a.a()
      * ================================================================
-     *
-     * This is the important method:
-     *
-     * a(
-     *   PerformanceSetting$b,
-     *   String
-     * )
-     *
-     * The String is the JSON/config string which is parsed by
-     * PerformanceSetting$a.a().
-     *
-     * We do NOT modify it yet.
-     *
-     * We only dump it so we can see the actual source containing
-     * touch_customize_capability.
      */
 
     private class PerformanceSettingAHooker
@@ -673,8 +657,6 @@ public class GyroKrModule extends XposedModule {
      * ================================================================
      * NEW: PerformanceSetting$a.d(String)
      * ================================================================
-     *
-     * d(packageName) obtains the PerformanceSetting$b for a package.
      */
 
     private class PerformanceSettingDHooker
@@ -741,7 +723,7 @@ public class GyroKrModule extends XposedModule {
 
     /*
      * ================================================================
-     * Reflection helper
+     * PerformanceSetting$b reflection helper
      * ================================================================
      */
 
