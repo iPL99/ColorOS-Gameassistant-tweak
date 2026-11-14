@@ -881,60 +881,53 @@ public class GyroKrModule extends XposedModule {
      * ================================================================
      */
 
-    private String describePerformanceSetting(
-            Object object) {
+    private String describePerformanceSetting(Object object) {
 
-        if (object == null) {
-            return "null";
-        }
-
-        try {
-
-            Class<?> clazz =
-                    object.getClass();
-
-            StringBuilder out =
-                    new StringBuilder();
-
-            out.append(
-                    clazz.getName()
-            );
-
-            out.append(" { ");
-
-            /*
-             * Known field:
-             *
-             * PerformanceSetting$b.d : String
-             *
-             * touchCustomizedCapability
-             */
-
-            Field field =
-                    clazz.getDeclaredField("d");
-
-            field.setAccessible(true);
-
-            Object value =
-                    field.get(object);
-
-            out.append("d=")
-                    .append(
-                            String.valueOf(
-                                    value
-                            )
-                    );
-
-            out.append(" }");
-
-            return out.toString();
-
-        } catch (Throwable e) {
-
-            return String.valueOf(object)
-                    + " [reflection error: "
-                    + e
-                    + "]";
-        }
+    if (object == null) {
+        return "null";
     }
+
+    try {
+
+        Class<?> clazz = object.getClass();
+
+        StringBuilder out = new StringBuilder();
+
+        out.append(clazz.getName());
+        out.append(" { ");
+
+        Field[] fields = clazz.getDeclaredFields();
+
+        for (Field field : fields) {
+
+            try {
+
+                field.setAccessible(true);
+
+                Object value = field.get(object);
+
+                out.append(field.getName())
+                        .append("=")
+                        .append(String.valueOf(value))
+                        .append(", ");
+
+            } catch (Throwable e) {
+
+                out.append(field.getName())
+                        .append("=<ERROR>, ");
+            }
+        }
+
+        out.append("}");
+
+        return out.toString();
+
+    } catch (Throwable e) {
+
+        return String.valueOf(object)
+                + " [reflection error: "
+                + e
+                + "]";
+    }
+  }
 }
