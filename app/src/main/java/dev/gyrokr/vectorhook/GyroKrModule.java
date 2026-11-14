@@ -22,14 +22,14 @@ public final class GyroKrModule extends XposedModule {
     private static final String FEATURE_CLASS =
             "com.coloros.gamespaceui.gamefunction.gyroscope.GyroscopeConfigFeature";
 
-    private static final String GATE_METHOD =
-            "s";
+    private static final String GATE_METHOD = "s";
 
-    private static final class GyroGateHooker
+    private final class GyroGateHooker
             implements XposedInterface.Hooker {
 
         @Override
-        public Object intercept(XposedInterface.Chain chain)
+        public Object intercept(
+                XposedInterface.Chain chain)
                 throws Throwable {
 
             Object packageName = chain.getArg(0);
@@ -85,11 +85,13 @@ public final class GyroKrModule extends XposedModule {
                     param.getClassLoader();
 
             if (loader == null) {
+
                 log(
                         Log.ERROR,
                         TAG,
                         "GameSpace ClassLoader is null"
                 );
+
                 return;
             }
 
@@ -124,13 +126,17 @@ public final class GyroKrModule extends XposedModule {
                     "Found method: " + gate
             );
 
-            if (!Modifier.isStatic(gate.getModifiers())) {
+            if (!Modifier.isStatic(
+                    gate.getModifiers())) {
+
                 throw new NoSuchMethodException(
                         "s(String) is not static"
                 );
             }
 
-            if (gate.getReturnType() != boolean.class) {
+            if (gate.getReturnType()
+                    != boolean.class) {
+
                 throw new NoSuchMethodException(
                         "s(String) does not return boolean"
                 );
@@ -150,13 +156,26 @@ public final class GyroKrModule extends XposedModule {
             log(
                     Log.INFO,
                     TAG,
+                    "================================"
+            );
+
+            log(
+                    Log.INFO,
+                    TAG,
                     "OplusGyroKR HOOK INSTALLED"
             );
 
             log(
                     Log.INFO,
                     TAG,
-                    "Target = " + TARGET_GAME
+                    "Target = "
+                            + TARGET_GAME
+            );
+
+            log(
+                    Log.INFO,
+                    TAG,
+                    "================================"
             );
 
         } catch (Throwable t) {
