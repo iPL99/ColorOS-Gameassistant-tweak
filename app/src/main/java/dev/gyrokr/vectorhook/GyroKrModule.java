@@ -25,9 +25,6 @@ public final class GyroKrModule extends XposedModule {
     private static final String GATE_METHOD =
             "s";
 
-    /**
-     * Hooker for libxposed API 102.
-     */
     private static final class GyroGateHooker
             implements XposedInterface.Hooker {
 
@@ -37,7 +34,8 @@ public final class GyroKrModule extends XposedModule {
 
             Object packageName = chain.getArg(0);
 
-            Log.i(
+            log(
+                    Log.INFO,
                     TAG,
                     "GyroscopeConfigFeature.s() called: "
                             + packageName
@@ -45,7 +43,8 @@ public final class GyroKrModule extends XposedModule {
 
             if (TARGET_GAME.equals(packageName)) {
 
-                Log.i(
+                log(
+                        Log.INFO,
                         TAG,
                         "Returning TRUE for "
                                 + TARGET_GAME
@@ -58,26 +57,24 @@ public final class GyroKrModule extends XposedModule {
         }
     }
 
-    /**
-     * libxposed API 102 callback.
-     */
     @Override
     public void onPackageReady(
             XposedModuleInterface.PackageReadyParam param) {
 
         String packageName = param.getPackageName();
 
-        Log.i(
+        log(
+                Log.INFO,
                 TAG,
-                "onPackageReady: "
-                        + packageName
+                "onPackageReady: " + packageName
         );
 
         if (!GAMESPACE_PACKAGE.equals(packageName)) {
             return;
         }
 
-        Log.i(
+        log(
+                Log.INFO,
                 TAG,
                 "GameSpace detected"
         );
@@ -88,19 +85,18 @@ public final class GyroKrModule extends XposedModule {
                     param.getClassLoader();
 
             if (loader == null) {
-
-                Log.e(
+                log(
+                        Log.ERROR,
                         TAG,
                         "GameSpace ClassLoader is null"
                 );
-
                 return;
             }
 
-            Log.i(
+            log(
+                    Log.INFO,
                     TAG,
-                    "ClassLoader = "
-                            + loader
+                    "ClassLoader = " + loader
             );
 
             Class<?> feature =
@@ -110,10 +106,10 @@ public final class GyroKrModule extends XposedModule {
                             loader
                     );
 
-            Log.i(
+            log(
+                    Log.INFO,
                     TAG,
-                    "Found class: "
-                            + feature.getName()
+                    "Found class: " + feature.getName()
             );
 
             Method gate =
@@ -122,29 +118,26 @@ public final class GyroKrModule extends XposedModule {
                             String.class
                     );
 
-            Log.i(
+            log(
+                    Log.INFO,
                     TAG,
-                    "Found method: "
-                            + gate
+                    "Found method: " + gate
             );
 
-            if (!Modifier.isStatic(
-                    gate.getModifiers())) {
-
+            if (!Modifier.isStatic(gate.getModifiers())) {
                 throw new NoSuchMethodException(
                         "s(String) is not static"
                 );
             }
 
-            if (gate.getReturnType()
-                    != boolean.class) {
-
+            if (gate.getReturnType() != boolean.class) {
                 throw new NoSuchMethodException(
                         "s(String) does not return boolean"
                 );
             }
 
-            Log.i(
+            log(
+                    Log.INFO,
                     TAG,
                     "Installing hook..."
             );
@@ -154,30 +147,22 @@ public final class GyroKrModule extends XposedModule {
                             new GyroGateHooker()
                     );
 
-            Log.i(
-                    TAG,
-                    "================================"
-            );
-
-            Log.i(
+            log(
+                    Log.INFO,
                     TAG,
                     "OplusGyroKR HOOK INSTALLED"
             );
 
-            Log.i(
+            log(
+                    Log.INFO,
                     TAG,
-                    "Target = "
-                            + TARGET_GAME
-            );
-
-            Log.i(
-                    TAG,
-                    "================================"
+                    "Target = " + TARGET_GAME
             );
 
         } catch (Throwable t) {
 
-            Log.e(
+            log(
+                    Log.ERROR,
                     TAG,
                     "Failed to install gyro hook",
                     t
