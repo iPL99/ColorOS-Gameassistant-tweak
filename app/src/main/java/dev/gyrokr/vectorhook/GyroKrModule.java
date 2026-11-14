@@ -2,58 +2,165 @@ package dev.gyrokr.vectorhook;
 
 import android.util.Log;
 
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;
 
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-
-public final class GyroKrModule extends XposedModule {
+public class GyroKrModule extends XposedModule {
 
     private static final String TAG = "OplusGyroKR";
 
-    private static final String GAMESPACE_PACKAGE =
+    private static final String GAME_SPACE_PACKAGE =
             "com.oplus.games";
 
-    private static final String TARGET_GAME =
+    private static final String TARGET_GAME_PACKAGE =
             "com.pubg.krmobile";
 
-    private static final String FEATURE_CLASS =
-            "com.coloros.gamespaceui.gamefunction.gyroscope.GyroscopeConfigFeature";
+    private static final String GYRO_CLASS =
+            "business.module.gyroscope.GyroscopeConfigFeature";
 
-    private static final String GATE_METHOD =
-            "s";
+    public GyroKrModule() {
+        // 절대로 여기서 log() 호출하지 않음.
+        // Vector framework가 아직 attach되지 않은 상태일 수 있음.
+    }
 
     @Override
-public void onModuleLoaded(
-        XposedModuleInterface.ModuleLoadedParam param) {
+    public void onModuleLoaded(
+            XposedModuleInterface.ModuleLoadedParam param) {
 
-    log(
-            Log.INFO,
-            TAG,
-            "================================"
-    );
+        try {
+            log(TAG + " onModuleLoaded");
+            log(TAG + " Process = " + param.getProcessName());
+        } catch (Throwable e) {
+            Log.e(TAG, "onModuleLoaded failed", e);
+        }
+    }
 
-    log(
-            Log.INFO,
-            TAG,
-            "OplusGyroKR onModuleLoaded"
-    );
+    @Override
+    public void onPackageReady(
+            XposedModuleInterface.PackageReadyParam param) {
 
-    log(
-            Log.INFO,
-            TAG,
-            "Process = "
-                    + param.getProcessName()
-    );
+        String packageName = null;
 
-    log(
-            Log.INFO,
-            TAG,
-            "================================"
-    );
-}
+        try {
+            packageName = param.getPackageName();
+
+            log(TAG + " onPackageReady: " + packageName);
+
+            if (!GAME_SPACE_PACKAGE.equals(packageName)) {
+                return;
+            }
+
+            log(TAG + " GameSpace detected");
+
+            ClassLoader classLoader = param.getClassLoader();
+
+            log(TAG + " Package = " + packageName);
+            log(TAG + " ClassLoader = " + classLoader);
+
+            installGameSpaceGyroHook(classLoader);
+
+        } catch (Throwable e) {
+            log(TAG + " onPackageReady exception: " + e);
+            Log.e(TAG, "onPackageReady failed", e);
+        }
+    }
+
+    private void installGameSpaceGyroHook(
+            ClassLoader classLoader) {
+
+        try {
+            /*
+             * Current ColorOS 17 GameSpace:
+             *
+             * business.module.gyroscope.GyroscopeConfigFeature
+             */
+
+            Class<?> featureClass = Class.forName(
+                    GYRO_CLASS,
+                    false,
+                    classLoader
+            );
+
+            log(TAG + " GyroscopeConfigFeature FOUND");
+            log(TAG + " Class = " + featureClass.getName());
+
+            Method[] methods = featureClass.getDeclaredMethods();
+
+            log(TAG + " Method count = " + methods.length);
+
+            Method targetMethod = null;
+
+            for (Method method : methods) {
+
+                log(
+                        TAG
+                                + " Method: "
+                                + method.getName()
+                                + " "
+                                + method.toGenericString()
+                );
+
+                if ("s".equals(method.getName())
+                        && method.getParameterTypes().length == 1
+                        && method.getParameterTypes()[0] == String.class
+                        && method.getReturnType() == boolean.class) {
+
+                    targetMethod = method;
+                    break;
+                }
+            }
+
+            if (targetMethod == null) {
+
+                log(TAG + " Method s(String):boolean NOT FOUND");
+
+                return;
+            }
+
+            log(TAG + " Found gate method:");
+            log(TAG + " " + targetMethod.toGenericString());
+
+            if (!Modifier.isStatic(targetMethod.getModifiers())) {
+                log(TAG + " Method s() is NOT static");
+            } else {
+                log(TAG + " Method s() is static");
+            }
+
+            targetMethod.setAccessible(true);
+
+            hook(
+                    targetMethod
+            ).intercept(
+                    new GyroGateHooker()
+            );
+
+            log(TAG + " GameSpace gyro hook INSTALLED");
+
+        } catch (ClassNotFoundException e) {
+
+            log(
+                    TAG
+                            + " GyroscopeConfigFeature NOT FOUND: "
+                            + GYRO_CLASS
+            );
+
+            Log.e(TAG, "GyroscopeConfigFeature not found", e);
+
+        } catch (Throwable e) {
+
+            log(TAG + " Failed to install GameSpace gyro hook");
+
+            Log.e(
+                    TAG,
+                    "Failed to install GameSpace gyro hook",
+                    e
+            );
+        }
+    }
 
     private final class GyroGateHooker
             implements XposedInterface.Hooker {
@@ -63,209 +170,48 @@ public void onModuleLoaded(
                 XposedInterface.Chain chain)
                 throws Throwable {
 
-            Object packageName =
-                    chain.getArg(0);
+            try {
 
-            log(
-                    Log.INFO,
-                    TAG,
-                    "GyroscopeConfigFeature.s() called: "
-                            + packageName
-            );
+                Object arg0 = chain.getArg(0);
 
-            if (TARGET_GAME.equals(packageName)) {
+                if (arg0 instanceof String) {
+
+                    String packageName = (String) arg0;
+
+                    if (TARGET_GAME_PACKAGE.equals(packageName)) {
+
+                        log(
+                                TAG
+                                        + " Gyro gate intercepted: "
+                                        + packageName
+                        );
+
+                        log(
+                                TAG
+                                        + " Returning TRUE for "
+                                        + TARGET_GAME_PACKAGE
+                        );
+
+                        return Boolean.TRUE;
+                    }
+                }
+
+            } catch (Throwable e) {
 
                 log(
-                        Log.INFO,
-                        TAG,
-                        "Returning TRUE for "
-                                + TARGET_GAME
+                        TAG
+                                + " GyroGateHooker exception: "
+                                + e
                 );
 
-                return Boolean.TRUE;
+                Log.e(
+                        TAG,
+                        "GyroGateHooker failed",
+                        e
+                );
             }
 
             return chain.proceed();
-        }
-    }
-
-    @Override
-    public void onPackageReady(
-            XposedModuleInterface.PackageReadyParam param) {
-
-        String packageName =
-                param.getPackageName();
-
-        log(
-                Log.INFO,
-                TAG,
-                "onPackageReady: "
-                        + packageName
-        );
-
-        if (!GAMESPACE_PACKAGE.equals(packageName)) {
-
-            log(
-                    Log.INFO,
-                    TAG,
-                    "Ignoring package: "
-                            + packageName
-            );
-
-            return;
-        }
-
-        log(
-                Log.INFO,
-                TAG,
-                "================================"
-        );
-
-        log(
-                Log.INFO,
-                TAG,
-                "GameSpace detected"
-        );
-
-        log(
-                Log.INFO,
-                TAG,
-                "Package = "
-                        + packageName
-        );
-
-        log(
-                Log.INFO,
-                TAG,
-                "================================"
-        );
-
-        try {
-
-            ClassLoader loader =
-                    param.getClassLoader();
-
-            if (loader == null) {
-
-                log(
-                        Log.ERROR,
-                        TAG,
-                        "GameSpace ClassLoader is NULL"
-                );
-
-                return;
-            }
-
-            log(
-                    Log.INFO,
-                    TAG,
-                    "ClassLoader = "
-                            + loader
-            );
-
-            Class<?> feature =
-                    Class.forName(
-                            FEATURE_CLASS,
-                            false,
-                            loader
-                    );
-
-            log(
-                    Log.INFO,
-                    TAG,
-                    "Found class: "
-                            + feature.getName()
-            );
-
-            Method gate =
-                    feature.getDeclaredMethod(
-                            GATE_METHOD,
-                            String.class
-                    );
-
-            log(
-                    Log.INFO,
-                    TAG,
-                    "Found method: "
-                            + gate
-            );
-
-            if (!Modifier.isStatic(
-                    gate.getModifiers())) {
-
-                throw new NoSuchMethodException(
-                        "s(String) is not static"
-                );
-            }
-
-            if (gate.getReturnType()
-                    != boolean.class) {
-
-                throw new NoSuchMethodException(
-                        "s(String) does not return boolean"
-                );
-            }
-
-            log(
-                    Log.INFO,
-                    TAG,
-                    "Method signature verified"
-            );
-
-            log(
-                    Log.INFO,
-                    TAG,
-                    "Installing hook..."
-            );
-
-            hook(gate)
-                    .intercept(
-                            new GyroGateHooker()
-                    );
-
-            log(
-                    Log.INFO,
-                    TAG,
-                    "================================"
-            );
-
-            log(
-                    Log.INFO,
-                    TAG,
-                    "OplusGyroKR HOOK INSTALLED"
-            );
-
-            log(
-                    Log.INFO,
-                    TAG,
-                    "Target = "
-                            + TARGET_GAME
-            );
-
-            log(
-                    Log.INFO,
-                    TAG,
-                    "Method = "
-                            + FEATURE_CLASS
-                            + "."
-                            + GATE_METHOD
-                            + "(String)"
-            );
-
-            log(
-                    Log.INFO,
-                    TAG,
-                    "================================"
-            );
-
-        } catch (Throwable t) {
-
-            log(
-                    Log.ERROR,
-                    TAG,
-                    "Failed to install GameSpace gyro hook",
-                    t
-            );
         }
     }
 }
