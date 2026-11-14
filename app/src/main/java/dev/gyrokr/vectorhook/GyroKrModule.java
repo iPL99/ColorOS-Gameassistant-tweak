@@ -9,14 +9,6 @@ import io.github.libxposed.api.XposedModuleInterface;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 
-/**
- * OplusGyroKR
- *
- * ColorOS / Oplus GameSpace의 GyroscopeConfigFeature.s(String)
- * allow-list gate만 우회한다.
- *
- * 기존 q()의 hardware capability check는 건드리지 않는다.
- */
 public final class GyroKrModule extends XposedModule {
 
     private static final String TAG = "OplusGyroKR";
@@ -33,15 +25,8 @@ public final class GyroKrModule extends XposedModule {
     private static final String GATE_METHOD =
             "s";
 
-
     /**
-     * libxposed API 102 Hooker.
-     *
-     * 실제 notdeveloper-1.7.0에서 확인한 구조:
-     *
-     *   intercept(Chain)
-     *   chain.getArg(0)
-     *   chain.proceed()
+     * Hooker for libxposed API 102.
      */
     private static final class GyroGateHooker
             implements XposedInterface.Hooker {
@@ -50,12 +35,21 @@ public final class GyroKrModule extends XposedModule {
         public Object intercept(XposedInterface.Chain chain)
                 throws Throwable {
 
-            Object arg = chain.getArg(0);
+            Object packageName = chain.getArg(0);
 
-            if (TARGET_GAME.equals(arg)) {
-                Log.i(TAG,
-                        "Gyroscope allow-list bypass: "
-                                + TARGET_GAME);
+            Log.i(
+                    TAG,
+                    "GyroscopeConfigFeature.s() called: "
+                            + packageName
+            );
+
+            if (TARGET_GAME.equals(packageName)) {
+
+                Log.i(
+                        TAG,
+                        "Returning TRUE for "
+                                + TARGET_GAME
+                );
 
                 return Boolean.TRUE;
             }
@@ -64,9 +58,8 @@ public final class GyroKrModule extends XposedModule {
         }
     }
 
-
     /**
-     * Vector / libxposed API 102의 실제 package callback.
+     * libxposed API 102 callback.
      */
     @Override
     public void onPackageReady(
@@ -74,73 +67,119 @@ public final class GyroKrModule extends XposedModule {
 
         String packageName = param.getPackageName();
 
+        Log.i(
+                TAG,
+                "onPackageReady: "
+                        + packageName
+        );
+
         if (!GAMESPACE_PACKAGE.equals(packageName)) {
             return;
         }
 
+        Log.i(
+                TAG,
+                "GameSpace detected"
+        );
+
         try {
-            ClassLoader loader = param.getClassLoader();
+
+            ClassLoader loader =
+                    param.getClassLoader();
 
             if (loader == null) {
-                log(
-                        Log.ERROR,
+
+                Log.e(
                         TAG,
-                        "GameSpace ClassLoader is null",
-                        null
+                        "GameSpace ClassLoader is null"
                 );
+
                 return;
             }
 
-            Class<?> feature = Class.forName(
-                    FEATURE_CLASS,
-                    false,
-                    loader
-            );
-
-            Method gate = feature.getDeclaredMethod(
-                    GATE_METHOD,
-                    String.class
-            );
-
-            /*
-             * OTA로 메서드 signature가 바뀌면
-             * 안전하게 hook하지 않는다.
-             */
-            if (!Modifier.isStatic(gate.getModifiers())) {
-                throw new NoSuchMethodException(
-                        "GyroscopeConfigFeature.s is not static"
-                );
-            }
-
-            if (gate.getReturnType() != boolean.class) {
-                throw new NoSuchMethodException(
-                        "GyroscopeConfigFeature.s does not return boolean"
-                );
-            }
-
-            /*
-             * 실제 API 102에서 확인한 방식:
-             *
-             * module.hook(method)
-             *        .intercept(Hooker)
-             */
-            hook(gate)
-                    .intercept(new GyroGateHooker());
-
-            log(
-                    Log.INFO,
+            Log.i(
                     TAG,
-                    "Installed gyro allow-list hook in "
-                            + GAMESPACE_PACKAGE,
-                    null
+                    "ClassLoader = "
+                            + loader
+            );
+
+            Class<?> feature =
+                    Class.forName(
+                            FEATURE_CLASS,
+                            false,
+                            loader
+                    );
+
+            Log.i(
+                    TAG,
+                    "Found class: "
+                            + feature.getName()
+            );
+
+            Method gate =
+                    feature.getDeclaredMethod(
+                            GATE_METHOD,
+                            String.class
+                    );
+
+            Log.i(
+                    TAG,
+                    "Found method: "
+                            + gate
+            );
+
+            if (!Modifier.isStatic(
+                    gate.getModifiers())) {
+
+                throw new NoSuchMethodException(
+                        "s(String) is not static"
+                );
+            }
+
+            if (gate.getReturnType()
+                    != boolean.class) {
+
+                throw new NoSuchMethodException(
+                        "s(String) does not return boolean"
+                );
+            }
+
+            Log.i(
+                    TAG,
+                    "Installing hook..."
+            );
+
+            hook(gate)
+                    .intercept(
+                            new GyroGateHooker()
+                    );
+
+            Log.i(
+                    TAG,
+                    "================================"
+            );
+
+            Log.i(
+                    TAG,
+                    "OplusGyroKR HOOK INSTALLED"
+            );
+
+            Log.i(
+                    TAG,
+                    "Target = "
+                            + TARGET_GAME
+            );
+
+            Log.i(
+                    TAG,
+                    "================================"
             );
 
         } catch (Throwable t) {
 
-            log(
-                    Log.ERROR,
+            Log.e(
                     TAG,
-                    "Failed to install GameSpace gyro hook",
+                    "Failed to install gyro hook",
                     t
             );
         }
