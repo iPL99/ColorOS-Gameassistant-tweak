@@ -25,35 +25,6 @@ public final class GyroKrModule extends XposedModule {
     private static final String GATE_METHOD =
             "s";
 
-    /*
-     * Constructor test.
-     *
-     * This is intentionally the only diagnostic change.
-     * It creates a marker file if Vector actually instantiates
-     * GyroKrModule.
-     */
-    public GyroKrModule() {
-        super();
-
-        try {
-            java.io.File file =
-                    new java.io.File(
-                            "/data/local/tmp/gyrokr_constructor"
-                    );
-
-            java.io.FileWriter writer =
-                    new java.io.FileWriter(file);
-
-            writer.write(
-                    "MODULE CONSTRUCTOR CALLED\n"
-            );
-
-            writer.close();
-
-        } catch (Throwable ignored) {
-        }
-    }
-
     private final class GyroGateHooker
             implements XposedInterface.Hooker {
 
