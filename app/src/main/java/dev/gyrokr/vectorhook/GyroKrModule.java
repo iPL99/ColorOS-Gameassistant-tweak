@@ -3,7 +3,6 @@ package dev.gyrokr.vectorhook;
 import android.util.Log;
 
 import java.lang.reflect.Method;
-import java.util.List;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
@@ -25,9 +24,6 @@ public class GyroKrModule extends XposedModule {
 
     private static final String COSA_CLASS =
             "com.oplus.cosa.COSASDKManager";
-
-    private static final String TOUCH_RESPONSE_COMMAND =
-            "command_multi_touch_rate";
 
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
@@ -56,7 +52,8 @@ public class GyroKrModule extends XposedModule {
     @Override
     public void onPackageReady(PackageReadyParam param) {
 
-        String packageName = param.getPackageName();
+        String packageName =
+                param.getPackageName();
 
         log(
                 Log.INFO,
@@ -214,7 +211,7 @@ public class GyroKrModule extends XposedModule {
              * =========================================================
              */
 
-            installCosaTouchResponseHooks(
+            installCosaTouchHooks(
                     classLoader
             );
 
@@ -234,7 +231,7 @@ public class GyroKrModule extends XposedModule {
         }
     }
 
-    private void installCosaTouchResponseHooks(
+    private void installCosaTouchHooks(
             ClassLoader classLoader
     ) {
 
@@ -266,169 +263,216 @@ public class GyroKrModule extends XposedModule {
                             + cosaClass.getName()
             );
 
-            Method[] cosaMethods =
+            Method[] methods =
                     cosaClass.getDeclaredMethods();
 
             log(
                     Log.INFO,
                     TAG,
                     "COSA Method count = "
-                            + cosaMethods.length
+                            + methods.length
             );
 
-            Method supportTouchResponseMethod = null;
-
-            Method supportFeatureListMethod = null;
-
-            for (Method method : cosaMethods) {
+            for (Method method : methods) {
 
                 String name =
                         method.getName();
 
+                /*
+                 * -----------------------------------------------------
+                 * isSupportTouchResponse()
+                 * -----------------------------------------------------
+                 */
+
                 if ("isSupportTouchResponse"
-                        .equals(name)) {
+                        .equals(name)
+                        && method.getParameterTypes().length == 0) {
 
-                    supportTouchResponseMethod =
-                            method;
+                    method.setAccessible(true);
+
+                    hook(method)
+                            .intercept(
+                                    new TouchResponseHooker()
+                            );
 
                     log(
                             Log.INFO,
                             TAG,
-                            "FOUND isSupportTouchResponse: "
+                            "isSupportTouchResponse hook INSTALLED: "
                                     + method.toString()
                     );
                 }
 
-                if ("getSupportFeatureList"
-                        .equals(name)) {
+                /*
+                 * -----------------------------------------------------
+                 * isSupportExtremeTouch(String)
+                 * -----------------------------------------------------
+                 */
 
-                    supportFeatureListMethod =
-                            method;
+                if ("isSupportExtremeTouch"
+                        .equals(name)
+                        && method.getParameterTypes().length == 1
+                        && method.getParameterTypes()[0]
+                        == String.class) {
+
+                    method.setAccessible(true);
+
+                    hook(method)
+                            .intercept(
+                                    new GamePackageBooleanHooker(
+                                            "isSupportExtremeTouch"
+                                    )
+                            );
 
                     log(
                             Log.INFO,
                             TAG,
-                            "FOUND getSupportFeatureList: "
+                            "isSupportExtremeTouch hook INSTALLED: "
+                                    + method.toString()
+                    );
+                }
+
+                /*
+                 * -----------------------------------------------------
+                 * getTouchCustomizedCapability(String)
+                 * -----------------------------------------------------
+                 */
+
+                if ("getTouchCustomizedCapability"
+                        .equals(name)
+                        && method.getParameterTypes().length == 1
+                        && method.getParameterTypes()[0]
+                        == String.class) {
+
+                    method.setAccessible(true);
+
+                    hook(method)
+                            .intercept(
+                                    new GamePackageObjectHooker(
+                                            "getTouchCustomizedCapability"
+                                    )
+                            );
+
+                    log(
+                            Log.INFO,
+                            TAG,
+                            "getTouchCustomizedCapability hook INSTALLED: "
+                                    + method.toString()
+                    );
+                }
+
+                /*
+                 * -----------------------------------------------------
+                 * setTouchSensibility(int)
+                 * -----------------------------------------------------
+                 */
+
+                if ("setTouchSensibility"
+                        .equals(name)
+                        && method.getParameterTypes().length == 1
+                        && method.getParameterTypes()[0]
+                        == int.class) {
+
+                    method.setAccessible(true);
+
+                    hook(method)
+                            .intercept(
+                                    new TouchIntSetterHooker(
+                                            "setTouchSensibility"
+                                    )
+                            );
+
+                    log(
+                            Log.INFO,
+                            TAG,
+                            "setTouchSensibility hook INSTALLED: "
+                                    + method.toString()
+                    );
+                }
+
+                /*
+                 * -----------------------------------------------------
+                 * setTouchSmoothly(int)
+                 * -----------------------------------------------------
+                 */
+
+                if ("setTouchSmoothly"
+                        .equals(name)
+                        && method.getParameterTypes().length == 1
+                        && method.getParameterTypes()[0]
+                        == int.class) {
+
+                    method.setAccessible(true);
+
+                    hook(method)
+                            .intercept(
+                                    new TouchIntSetterHooker(
+                                            "setTouchSmoothly"
+                                    )
+                            );
+
+                    log(
+                            Log.INFO,
+                            TAG,
+                            "setTouchSmoothly hook INSTALLED: "
                                     + method.toString()
                     );
                 }
             }
 
             /*
-             * ---------------------------------------------------------
-             * getSupportFeatureList()
-             * ---------------------------------------------------------
+             * Print useful COSA touch methods.
              */
 
-            if (supportFeatureListMethod != null) {
-
-                try {
-
-                    supportFeatureListMethod
-                            .setAccessible(true);
-
-                    log(
-                            Log.INFO,
-                            TAG,
-                            "Attempting to inspect "
-                                    + "getSupportFeatureList()"
-                    );
-
-                    /*
-                     * COSASDKManager is normally a singleton.
-                     * We do not invoke it here because we first
-                     * want to avoid guessing its singleton accessor.
-                     *
-                     * The actual method will be hooked below if possible.
-                     */
-
-                } catch (Throwable t) {
-
-                    log(
-                            Log.ERROR,
-                            TAG,
-                            "getSupportFeatureList setup failed: "
-                                    + t
-                    );
-                }
-            }
-
-            /*
-             * ---------------------------------------------------------
-             * isSupportTouchResponse()
-             * ---------------------------------------------------------
-             */
-
-            if (supportTouchResponseMethod != null) {
-
-                supportTouchResponseMethod
-                        .setAccessible(true);
-
-                hook(
-                        supportTouchResponseMethod
-                ).intercept(
-                        new TouchResponseHooker()
-                );
-
-                log(
-                        Log.INFO,
-                        TAG,
-                        "isSupportTouchResponse hook INSTALLED"
-                );
-
-            } else {
-
-                log(
-                        Log.WARN,
-                        TAG,
-                        "isSupportTouchResponse() NOT FOUND"
-                );
-            }
-
-            /*
-             * Print all COSA methods containing
-             * Touch / Feature / Support / MultiTouch.
-             */
-
-            for (Method method : cosaMethods) {
+            for (Method method : methods) {
 
                 String text =
                         method.toString();
 
                 if (text.contains("Touch")
                         || text.contains("touch")
-                        || text.contains("Feature")
-                        || text.contains("feature")
+                        || text.contains("Extreme")
+                        || text.contains("extreme")
                         || text.contains("Support")
-                        || text.contains("support")
-                        || text.contains("MultiTouch")
-                        || text.contains("multiTouch")) {
+                        || text.contains("support")) {
 
                     log(
                             Log.INFO,
                             TAG,
-                            "COSA relevant method: "
+                            "COSA touch method: "
                                     + text
                     );
                 }
             }
+
+            log(
+                    Log.INFO,
+                    TAG,
+                    "COSA touch hooks INSTALLED"
+            );
 
         } catch (Throwable t) {
 
             log(
                     Log.ERROR,
                     TAG,
-                    "Failed to inspect COSASDKManager: "
+                    "Failed to install COSA touch hooks: "
                             + t
             );
 
             Log.e(
                     TAG,
-                    "COSA inspection error",
+                    "COSA touch hook error",
                     t
             );
         }
     }
+
+    /*
+     * ================================================================
+     * isSupportTouchResponse()
+     * ================================================================
+     */
 
     private final class TouchResponseHooker
             implements XposedInterface.Hooker {
@@ -438,7 +482,7 @@ public class GyroKrModule extends XposedModule {
                 XposedInterface.Chain chain
         ) throws Throwable {
 
-            Object originalResult =
+            Object result =
                     chain.proceed();
 
             log(
@@ -446,19 +490,206 @@ public class GyroKrModule extends XposedModule {
                     TAG,
                     "isSupportTouchResponse() "
                             + "ORIGINAL = "
-                            + originalResult
+                            + result
             );
 
-            return originalResult;
+            return result;
         }
     }
+
+    /*
+     * ================================================================
+     * Game-specific boolean methods
+     *
+     * isSupportExtremeTouch(String)
+     * ================================================================
+     */
+
+    private final class GamePackageBooleanHooker
+            implements XposedInterface.Hooker {
+
+        private final String methodName;
+
+        GamePackageBooleanHooker(
+                String methodName
+        ) {
+
+            this.methodName =
+                    methodName;
+        }
+
+        @Override
+        public Object intercept(
+                XposedInterface.Chain chain
+        ) throws Throwable {
+
+            Object arg0 =
+                    chain.getArg(0);
+
+            if (arg0 instanceof String) {
+
+                String packageName =
+                        (String) arg0;
+
+                Object result =
+                        chain.proceed();
+
+                log(
+                        Log.INFO,
+                        TAG,
+                        methodName
+                                + "("
+                                + packageName
+                                + ") ORIGINAL = "
+                                + result
+                );
+
+                if (TARGET_GAME_PACKAGE
+                        .equals(packageName)) {
+
+                    log(
+                            Log.INFO,
+                            TAG,
+                            methodName
+                                    + " TARGET = "
+                                    + TARGET_GAME_PACKAGE
+                    );
+                }
+
+                return result;
+            }
+
+            return chain.proceed();
+        }
+    }
+
+    /*
+     * ================================================================
+     * getTouchCustomizedCapability(String)
+     * ================================================================
+     */
+
+    private final class GamePackageObjectHooker
+            implements XposedInterface.Hooker {
+
+        private final String methodName;
+
+        GamePackageObjectHooker(
+                String methodName
+        ) {
+
+            this.methodName =
+                    methodName;
+        }
+
+        @Override
+        public Object intercept(
+                XposedInterface.Chain chain
+        ) throws Throwable {
+
+            Object arg0 =
+                    chain.getArg(0);
+
+            Object result =
+                    chain.proceed();
+
+            if (arg0 instanceof String) {
+
+                String packageName =
+                        (String) arg0;
+
+                log(
+                        Log.INFO,
+                        TAG,
+                        methodName
+                                + "("
+                                + packageName
+                                + ") = "
+                                + result
+                );
+
+                if (TARGET_GAME_PACKAGE
+                        .equals(packageName)) {
+
+                    log(
+                            Log.INFO,
+                            TAG,
+                            methodName
+                                    + " TARGET PACKAGE HIT"
+                    );
+                }
+            }
+
+            return result;
+        }
+    }
+
+    /*
+     * ================================================================
+     * setTouchSensibility(int)
+     * setTouchSmoothly(int)
+     * ================================================================
+     */
+
+    private final class TouchIntSetterHooker
+            implements XposedInterface.Hooker {
+
+        private final String methodName;
+
+        TouchIntSetterHooker(
+                String methodName
+        ) {
+
+            this.methodName =
+                    methodName;
+        }
+
+        @Override
+        public Object intercept(
+                XposedInterface.Chain chain
+        ) throws Throwable {
+
+            Object arg0 =
+                    chain.getArg(0);
+
+            log(
+                    Log.INFO,
+                    TAG,
+                    methodName
+                            + "("
+                            + String.valueOf(arg0)
+                            + ") CALLED"
+            );
+
+            Object result =
+                    chain.proceed();
+
+            log(
+                    Log.INFO,
+                    TAG,
+                    methodName
+                            + " RESULT = "
+                            + result
+            );
+
+            return result;
+        }
+    }
+
+    /*
+     * ================================================================
+     * Existing gyro hooks
+     * ================================================================
+     */
 
     private final class GyroGateHooker
             implements XposedInterface.Hooker {
 
         private final String methodName;
 
-        GyroGateHooker(String methodName) {
+        GyroGateHooker(
+                String methodName
+        ) {
 
             this.methodName =
                     methodName;
