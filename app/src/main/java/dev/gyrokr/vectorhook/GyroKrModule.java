@@ -26,37 +26,34 @@ public final class GyroKrModule extends XposedModule {
             "s";
 
     /*
-     * Module constructor
+     * Constructor test.
      *
-     * Confirms that Vector actually creates our module class.
+     * This is intentionally the only diagnostic change.
+     * It creates a marker file if Vector actually instantiates
+     * GyroKrModule.
      */
     public GyroKrModule() {
         super();
 
-        log(
-                Log.INFO,
-                TAG,
-                "================================"
-        );
+        try {
+            java.io.File file =
+                    new java.io.File(
+                            "/data/local/tmp/gyrokr_constructor"
+                    );
 
-        log(
-                Log.INFO,
-                TAG,
-                "OplusGyroKR MODULE CONSTRUCTOR CALLED"
-        );
+            java.io.FileWriter writer =
+                    new java.io.FileWriter(file);
 
-        log(
-                Log.INFO,
-                TAG,
-                "================================"
-        );
+            writer.write(
+                    "MODULE CONSTRUCTOR CALLED\n"
+            );
+
+            writer.close();
+
+        } catch (Throwable ignored) {
+        }
     }
 
-    /*
-     * Hook implementation.
-     *
-     * This is the actual libxposed API 102 Hooker interface.
-     */
     private final class GyroGateHooker
             implements XposedInterface.Hooker {
 
@@ -75,10 +72,6 @@ public final class GyroKrModule extends XposedModule {
                             + packageName
             );
 
-            /*
-             * Only bypass the allow-list for
-             * Korean PUBG Mobile.
-             */
             if (TARGET_GAME.equals(packageName)) {
 
                 log(
@@ -91,16 +84,10 @@ public final class GyroKrModule extends XposedModule {
                 return Boolean.TRUE;
             }
 
-            /*
-             * All other packages keep the original behavior.
-             */
             return chain.proceed();
         }
     }
 
-    /*
-     * Vector / libxposed API 102 callback.
-     */
     @Override
     public void onPackageReady(
             XposedModuleInterface.PackageReadyParam param) {
@@ -115,10 +102,6 @@ public final class GyroKrModule extends XposedModule {
                         + packageName
         );
 
-        /*
-         * We only want to inject into
-         * Oplus GameSpace.
-         */
         if (!GAMESPACE_PACKAGE.equals(packageName)) {
 
             log(
@@ -158,9 +141,6 @@ public final class GyroKrModule extends XposedModule {
 
         try {
 
-            /*
-             * API 102 uses getClassLoader().
-             */
             ClassLoader loader =
                     param.getClassLoader();
 
@@ -182,11 +162,6 @@ public final class GyroKrModule extends XposedModule {
                             + loader
             );
 
-            /*
-             * Locate:
-             *
-             * com.coloros.gamespaceui.gamefunction.gyroscope.GyroscopeConfigFeature
-             */
             Class<?> feature =
                     Class.forName(
                             FEATURE_CLASS,
@@ -201,11 +176,6 @@ public final class GyroKrModule extends XposedModule {
                             + feature.getName()
             );
 
-            /*
-             * Locate:
-             *
-             * static boolean s(String)
-             */
             Method gate =
                     feature.getDeclaredMethod(
                             GATE_METHOD,
@@ -219,9 +189,6 @@ public final class GyroKrModule extends XposedModule {
                             + gate
             );
 
-            /*
-             * Verify method signature.
-             */
             if (!Modifier.isStatic(
                     gate.getModifiers())) {
 
@@ -244,13 +211,6 @@ public final class GyroKrModule extends XposedModule {
                     "Method signature verified"
             );
 
-            /*
-             * Install libxposed API 102 hook.
-             *
-             * This is the same general
-             * hook(...).intercept(...)
-             * pattern we found in notdeveloper.
-             */
             log(
                     Log.INFO,
                     TAG,
