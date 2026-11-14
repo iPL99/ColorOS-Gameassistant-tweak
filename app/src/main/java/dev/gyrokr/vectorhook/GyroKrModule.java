@@ -1,7 +1,9 @@
 package dev.gyrokr.vectorhook;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.List;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
@@ -12,6 +14,7 @@ public class GyroKrModule extends XposedModule {
     private static final String TAG = "OplusGyroKR";
 
     private static final String GAME_SPACE = "com.oplus.games";
+    private static final String COSA = "com.oplus.cosa";
     private static final String TARGET_GAME = "com.pubg.krmobile";
 
     private static final int LOG_INFO = 4;
@@ -23,67 +26,159 @@ public class GyroKrModule extends XposedModule {
 
     @Override
     public void onModuleLoaded(
-            XposedModuleInterface.ModuleLoadedParam param
-    ) {
-        log(LOG_INFO, TAG, "onModuleLoaded");
-        log(LOG_INFO, TAG, "Process = " + param.getProcessName());
+            XposedModuleInterface.ModuleLoadedParam param) {
+
+        log(
+                LOG_INFO,
+                TAG,
+                "onModuleLoaded"
+        );
+
+        log(
+                LOG_INFO,
+                TAG,
+                "Process = " + param.getProcessName()
+        );
     }
 
     @Override
     public void onPackageReady(
-            XposedModuleInterface.PackageReadyParam param
-    ) {
+            XposedModuleInterface.PackageReadyParam param) {
+
         String packageName = param.getPackageName();
 
-        log(LOG_INFO, TAG, "onPackageReady: " + packageName);
-
-        if (!GAME_SPACE.equals(packageName)) {
-            return;
-        }
-
-        log(LOG_INFO, TAG, "GameSpace detected");
+        log(
+                LOG_INFO,
+                TAG,
+                "onPackageReady: " + packageName
+        );
 
         ClassLoader loader = param.getClassLoader();
 
-        installGyroscopeHooks(loader);
-        installTouchHooks(loader);
-        installFeatureListHook(loader);
-    }
+        /*
+         * ============================================================
+         * GameSpace
+         * ============================================================
+         */
+        if (GAME_SPACE.equals(packageName)) {
 
-    private void installGyroscopeHooks(ClassLoader loader) {
-        try {
-            Class<?> clazz = Class.forName(
-                    "business.module.gyroscope.GyroscopeConfigFeature",
-                    false,
-                    loader
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "GameSpace detected"
             );
 
-            log(LOG_INFO, TAG, "GyroscopeConfigFeature FOUND");
+            installGyroscopeHooks(loader);
+            installTouchHooks(loader);
+            installFeatureListHook(loader);
+
+            return;
+        }
+
+        /*
+         * ============================================================
+         * COSA
+         * ============================================================
+         */
+        if (COSA.equals(packageName)) {
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "COSA detected"
+            );
+
+            installPerformanceSettingHooks(loader);
+
+            return;
+        }
+    }
+
+    /*
+     * ================================================================
+     * Existing Gyroscope hooks
+     * ================================================================
+     */
+
+    private void installGyroscopeHooks(ClassLoader loader) {
+
+        try {
+
+            Class<?> clazz = loader.loadClass(
+                    "business.module.gyroscope.GyroscopeConfigFeature"
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "GyroscopeConfigFeature FOUND"
+            );
 
             int installed = 0;
 
             for (Method method : clazz.getDeclaredMethods()) {
 
-                if (!method.getName().equals("r")
-                        && !method.getName().equals("s")) {
-                    continue;
+                String name = method.getName();
+
+                Class<?>[] params = method.getParameterTypes();
+
+                /*
+                 * r(String):boolean
+                 * Chirality / AntiShake support gate
+                 */
+                if (
+                        "r".equals(name)
+                        && method.getReturnType() == boolean.class
+                        && params.length == 1
+                        && params[0] == String.class
+                ) {
+
+                    method.setAccessible(true);
+
+                    hook(
+                            method,
+                            new GyroGateHooker(
+                                    "r"
+                            )
+                    );
+
+                    log(
+                            LOG_INFO,
+                            TAG,
+                            "Gyroscope hook INSTALLED: " + method
+                    );
+
+                    installed++;
                 }
 
-                if (method.getParameterCount() != 1
-                        || method.getParameterTypes()[0] != String.class
-                        || method.getReturnType() != boolean.class) {
-                    continue;
+                /*
+                 * s(String):boolean
+                 * Sensitivity support gate
+                 */
+                else if (
+                        "s".equals(name)
+                        && method.getReturnType() == boolean.class
+                        && params.length == 1
+                        && params[0] == String.class
+                ) {
+
+                    method.setAccessible(true);
+
+                    hook(
+                            method,
+                            new GyroGateHooker(
+                                    "s"
+                            )
+                    );
+
+                    log(
+                            LOG_INFO,
+                            TAG,
+                            "Gyroscope hook INSTALLED: " + method
+                    );
+
+                    installed++;
                 }
-
-                hook(method).intercept(new GyroGateHooker());
-
-                installed++;
-
-                log(
-                        LOG_INFO,
-                        TAG,
-                        "Gyroscope hook INSTALLED: " + method
-                );
             }
 
             log(
@@ -92,25 +187,35 @@ public class GyroKrModule extends XposedModule {
                     "Gyroscope hooks installed = " + installed
             );
 
-        } catch (Throwable t) {
+        } catch (Throwable e) {
+
             log(
                     LOG_ERROR,
                     TAG,
-                    "Gyroscope hook error",
-                    t
+                    "Gyroscope hook ERROR: " + e
             );
         }
     }
 
+    /*
+     * ================================================================
+     * Existing COSASDKManager touch hooks
+     * ================================================================
+     */
+
     private void installTouchHooks(ClassLoader loader) {
+
         try {
-            Class<?> clazz = Class.forName(
-                    "com.oplus.cosa.COSASDKManager",
-                    false,
-                    loader
+
+            Class<?> clazz = loader.loadClass(
+                    "com.oplus.cosa.COSASDKManager"
             );
 
-            log(LOG_INFO, TAG, "COSASDKManager FOUND");
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "COSASDKManager FOUND"
+            );
 
             int installed = 0;
 
@@ -122,36 +227,27 @@ public class GyroKrModule extends XposedModule {
                     continue;
                 }
 
-                int modifiers = method.getModifiers();
-
-                if (method.isSynthetic()
-                        || method.isBridge()
-                        || Modifier.isAbstract(modifiers)
-                        || Modifier.isNative(modifiers)) {
+                /*
+                 * Static methods are skipped.
+                 */
+                if (Modifier.isStatic(method.getModifiers())) {
                     continue;
                 }
 
-                try {
-                    hook(method).intercept(
-                            new TouchTraceHooker()
-                    );
+                method.setAccessible(true);
 
-                    installed++;
+                hook(
+                        method,
+                        new TouchTraceHooker()
+                );
 
-                    log(
-                            LOG_INFO,
-                            TAG,
-                            "TOUCH HOOK INSTALLED: " + method
-                    );
+                log(
+                        LOG_INFO,
+                        TAG,
+                        "TOUCH HOOK INSTALLED: " + method.getName()
+                );
 
-                } catch (Throwable t) {
-                    log(
-                            LOG_ERROR,
-                            TAG,
-                            "Touch hook failed: " + method,
-                            t
-                    );
-                }
+                installed++;
             }
 
             log(
@@ -160,51 +256,61 @@ public class GyroKrModule extends XposedModule {
                     "ALL TOUCH HOOKS INSTALLED = " + installed
             );
 
-        } catch (Throwable t) {
+        } catch (Throwable e) {
+
             log(
                     LOG_ERROR,
                     TAG,
-                    "Touch hook error",
-                    t
+                    "Touch hook ERROR: " + e
             );
         }
     }
 
+    /*
+     * ================================================================
+     * Existing feature list hook
+     * ================================================================
+     */
+
     private void installFeatureListHook(ClassLoader loader) {
+
         try {
-            Class<?> clazz = Class.forName(
-                    "com.oplus.cosa.COSASDKManager",
-                    false,
-                    loader
+
+            Class<?> clazz = loader.loadClass(
+                    "com.oplus.cosa.COSASDKManager"
             );
 
             Method target = null;
 
             for (Method method : clazz.getDeclaredMethods()) {
 
-                if (!method.getName().equals(
-                        "getSupportFeatureList")) {
-                    continue;
-                }
+                if (
+                        "getSupportFeatureList".equals(
+                                method.getName()
+                        )
+                        && method.getParameterCount() == 0
+                ) {
 
-                if (method.getParameterCount() != 0) {
-                    continue;
+                    target = method;
+                    break;
                 }
-
-                target = method;
-                break;
             }
 
             if (target == null) {
+
                 log(
                         LOG_ERROR,
                         TAG,
-                        "getSupportFeatureList() NOT FOUND"
+                        "getSupportFeatureList NOT FOUND"
                 );
+
                 return;
             }
 
-            hook(target).intercept(
+            target.setAccessible(true);
+
+            hook(
+                    target,
                     new FeatureListHooker()
             );
 
@@ -214,34 +320,158 @@ public class GyroKrModule extends XposedModule {
                     "FEATURE LIST HOOK INSTALLED: " + target
             );
 
-        } catch (Throwable t) {
+        } catch (Throwable e) {
+
             log(
                     LOG_ERROR,
                     TAG,
-                    "Feature list hook error",
-                    t
+                    "Feature list hook ERROR: " + e
             );
         }
     }
 
+    /*
+     * ================================================================
+     * NEW: COSA PerformanceSetting hooks
+     * ================================================================
+     */
+
+    private void installPerformanceSettingHooks(
+            ClassLoader loader) {
+
+        try {
+
+            Class<?> clazz = loader.loadClass(
+                    "com.oplus.feature.gameopt.actionfeatures.PerformanceSetting$a"
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "PerformanceSetting$a FOUND"
+            );
+
+            int installed = 0;
+
+            /*
+             * a(
+             *   PerformanceSetting$b,
+             *   String
+             * ): PerformanceSetting$b
+             */
+            for (Method method : clazz.getDeclaredMethods()) {
+
+                if (
+                        "a".equals(method.getName())
+                        && method.getParameterCount() == 2
+                        && method.getParameterTypes()[1] == String.class
+                        && method.getReturnType().getName().equals(
+                                "com.oplus.feature.gameopt.actionfeatures.PerformanceSetting$b"
+                        )
+                ) {
+
+                    method.setAccessible(true);
+
+                    hook(
+                            method,
+                            new PerformanceSettingAHooker()
+                    );
+
+                    log(
+                            LOG_INFO,
+                            TAG,
+                            "PERFORMANCE HOOK INSTALLED: " + method
+                    );
+
+                    installed++;
+                }
+
+                /*
+                 * d(String):
+                 * PerformanceSetting$b
+                 */
+                else if (
+                        "d".equals(method.getName())
+                        && method.getParameterCount() == 1
+                        && method.getParameterTypes()[0] == String.class
+                        && method.getReturnType().getName().equals(
+                                "com.oplus.feature.gameopt.actionfeatures.PerformanceSetting$b"
+                        )
+                ) {
+
+                    method.setAccessible(true);
+
+                    hook(
+                            method,
+                            new PerformanceSettingDHooker()
+                    );
+
+                    log(
+                            LOG_INFO,
+                            TAG,
+                            "PERFORMANCE d() HOOK INSTALLED: " + method
+                    );
+
+                    installed++;
+                }
+            }
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "PerformanceSetting hooks installed = "
+                            + installed
+            );
+
+        } catch (Throwable e) {
+
+            log(
+                    LOG_ERROR,
+                    TAG,
+                    "PerformanceSetting hook ERROR: " + e
+            );
+        }
+    }
+
+    /*
+     * ================================================================
+     * Gyroscope hook
+     * ================================================================
+     */
+
     private class GyroGateHooker
             implements XposedInterface.Hooker {
 
+        private final String methodName;
+
+        GyroGateHooker(String methodName) {
+            this.methodName = methodName;
+        }
+
         @Override
         public Object intercept(
-                XposedInterface.Chain chain
-        ) throws Throwable {
+                XposedInterface.Chain chain)
+                throws Throwable {
 
-            Object arg = chain.getArg(0);
+            Object arg = null;
 
-            if (TARGET_GAME.equals(
-                    String.valueOf(arg))) {
+            if (chain.getExecutable().getParameterCount() > 0) {
+                arg = chain.getArg(0);
+            }
+
+            String packageName =
+                    String.valueOf(arg);
+
+            if (TARGET_GAME.equals(packageName)) {
 
                 log(
                         LOG_INFO,
                         TAG,
-                        "Gyroscope support forced TRUE for "
-                                + TARGET_GAME
+                        "GYRO TARGET HIT: "
+                                + methodName
+                                + "("
+                                + packageName
+                                + ") -> true"
                 );
 
                 return Boolean.TRUE;
@@ -251,25 +481,34 @@ public class GyroKrModule extends XposedModule {
         }
     }
 
+    /*
+     * ================================================================
+     * Touch trace hook
+     * ================================================================
+     */
+
     private class TouchTraceHooker
             implements XposedInterface.Hooker {
 
         @Override
         public Object intercept(
-                XposedInterface.Chain chain
-        ) throws Throwable {
+                XposedInterface.Chain chain)
+                throws Throwable {
 
             Method method =
                     (Method) chain.getExecutable();
 
-            String name = method.getName();
+            String name =
+                    method.getName();
 
             StringBuilder args =
                     new StringBuilder();
 
-            for (int i = 0;
-                 i < method.getParameterCount();
-                 i++) {
+            for (
+                    int i = 0;
+                    i < method.getParameterCount();
+                    i++
+            ) {
 
                 if (i > 0) {
                     args.append(", ");
@@ -295,7 +534,8 @@ public class GyroKrModule extends XposedModule {
                             + ")"
             );
 
-            Object result = chain.proceed();
+            Object result =
+                    chain.proceed();
 
             log(
                     LOG_INFO,
@@ -303,20 +543,26 @@ public class GyroKrModule extends XposedModule {
                     "TOUCH RESULT: "
                             + name
                             + " = "
-                            + result
+                            + String.valueOf(result)
             );
 
             return result;
         }
     }
 
+    /*
+     * ================================================================
+     * Feature list hook
+     * ================================================================
+     */
+
     private class FeatureListHooker
             implements XposedInterface.Hooker {
 
         @Override
         public Object intercept(
-                XposedInterface.Chain chain
-        ) throws Throwable {
+                XposedInterface.Chain chain)
+                throws Throwable {
 
             log(
                     LOG_INFO,
@@ -325,7 +571,8 @@ public class GyroKrModule extends XposedModule {
                             + "getSupportFeatureList()"
             );
 
-            Object result = chain.proceed();
+            Object result =
+                    chain.proceed();
 
             log(
                     LOG_INFO,
@@ -334,10 +581,10 @@ public class GyroKrModule extends XposedModule {
                             + String.valueOf(result)
             );
 
-            if (result instanceof java.util.List) {
+            if (result instanceof List) {
 
-                java.util.List<?> list =
-                        (java.util.List<?>) result;
+                List<?> list =
+                        (List<?>) result;
 
                 boolean multiTouch =
                         list.contains(
@@ -353,6 +600,203 @@ public class GyroKrModule extends XposedModule {
             }
 
             return result;
+        }
+    }
+
+    /*
+     * ================================================================
+     * NEW: PerformanceSetting$a.a()
+     * ================================================================
+     *
+     * This is the important method:
+     *
+     * a(
+     *   PerformanceSetting$b,
+     *   String
+     * )
+     *
+     * The String is the JSON/config string which is parsed by
+     * PerformanceSetting$a.a().
+     *
+     * We do NOT modify it yet.
+     *
+     * We only dump it so we can see the actual source containing
+     * touch_customize_capability.
+     */
+
+    private class PerformanceSettingAHooker
+            implements XposedInterface.Hooker {
+
+        @Override
+        public Object intercept(
+                XposedInterface.Chain chain)
+                throws Throwable {
+
+            String input = null;
+
+            if (
+                    chain.getExecutable()
+                            .getParameterCount() >= 2
+            ) {
+
+                Object arg1 =
+                        chain.getArg(1);
+
+                input =
+                        String.valueOf(arg1);
+            }
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "PERFORMANCE a() INPUT = "
+                            + input
+            );
+
+            Object result =
+                    chain.proceed();
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "PERFORMANCE a() RESULT = "
+                            + describePerformanceSetting(
+                                    result
+                            )
+            );
+
+            return result;
+        }
+    }
+
+    /*
+     * ================================================================
+     * NEW: PerformanceSetting$a.d(String)
+     * ================================================================
+     *
+     * d(packageName) obtains the PerformanceSetting$b for a package.
+     */
+
+    private class PerformanceSettingDHooker
+            implements XposedInterface.Hooker {
+
+        @Override
+        public Object intercept(
+                XposedInterface.Chain chain)
+                throws Throwable {
+
+            String packageName = null;
+
+            if (
+                    chain.getExecutable()
+                            .getParameterCount() >= 1
+            ) {
+
+                packageName =
+                        String.valueOf(
+                                chain.getArg(0)
+                        );
+            }
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "PERFORMANCE d() CALL = "
+                            + packageName
+            );
+
+            Object result =
+                    chain.proceed();
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "PERFORMANCE d() RESULT = "
+                            + describePerformanceSetting(
+                                    result
+                            )
+            );
+
+            if (
+                    TARGET_GAME.equals(
+                            packageName
+                    )
+            ) {
+
+                log(
+                        LOG_INFO,
+                        TAG,
+                        "PERFORMANCE TARGET HIT: "
+                                + packageName
+                                + " -> "
+                                + describePerformanceSetting(
+                                        result
+                                )
+                );
+            }
+
+            return result;
+        }
+    }
+
+    /*
+     * ================================================================
+     * Reflection helper
+     * ================================================================
+     */
+
+    private String describePerformanceSetting(
+            Object object) {
+
+        if (object == null) {
+            return "null";
+        }
+
+        try {
+
+            Class<?> clazz =
+                    object.getClass();
+
+            StringBuilder out =
+                    new StringBuilder();
+
+            out.append(
+                    clazz.getName()
+            );
+
+            out.append(" { ");
+
+            /*
+             * Known field:
+             *
+             * PerformanceSetting$b.d : String
+             *
+             * This is the touchCustomizedCapability field.
+             */
+
+            Field field =
+                    clazz.getDeclaredField("d");
+
+            field.setAccessible(true);
+
+            Object value =
+                    field.get(object);
+
+            out.append("d=")
+                    .append(
+                            String.valueOf(value)
+                    );
+
+            out.append(" }");
+
+            return out.toString();
+
+        } catch (Throwable e) {
+
+            return object.getClass().getName()
+                    + " { reflection-error="
+                    + e
+                    + " }";
         }
     }
 }
