@@ -743,67 +743,82 @@ public class GyroKrModule extends XposedModule {
      * ================================================================
      */
 
-    private class PerformanceSettingDHooker
-            implements XposedInterface.Hooker {
+    private static class PerformanceSettingDHooker
+        implements XposedInterface.Hooker {
 
-        @Override
-        public Object intercept(
-                XposedInterface.Chain chain)
-                throws Throwable {
+    @Override
+    public Object intercept(
+            XposedInterface.Chain chain)
+            throws Throwable {
 
-            String packageName = null;
+        Object result = chain.proceed();
 
-            if (
-                    chain.getExecutable()
-                            .getParameterCount() >= 1
-            ) {
-
-                packageName =
-                        String.valueOf(
-                                chain.getArg(0)
-                        );
-            }
-
-            log(
-                    LOG_INFO,
-                    TAG,
-                    "PERFORMANCE d() CALL = "
-                            + packageName
-            );
-
-            Object result =
-                    chain.proceed();
-
-            log(
-                    LOG_INFO,
+        try {
+            Log.i(
                     TAG,
                     "PERFORMANCE d() RESULT = "
-                            + describePerformanceSetting(
-                                    result
-                            )
+                            + describePerformanceSetting(result)
             );
 
-            if (
-                    TARGET_GAME.equals(
-                            packageName
-                    )
-            ) {
-
-                log(
-                        LOG_INFO,
+            if (result == null) {
+                Log.i(
                         TAG,
-                        "PERFORMANCE TARGET HIT: "
-                                + packageName
-                                + " -> "
-                                + describePerformanceSetting(
-                                        result
-                                )
+                        "PERFORMANCE d() RESULT CLASS = null"
                 );
+                return result;
             }
 
-            return result;
+            Class<?> resultClass = result.getClass();
+
+            Log.i(
+                    TAG,
+                    "PERFORMANCE d() RESULT CLASS = "
+                            + resultClass.getName()
+            );
+
+            /*
+             * PerformanceSetting$b 자체의 모든 필드를 출력한다.
+             * 현재 우리가 찾는 것은 touch_rate 관련 실제 값이다.
+             */
+            for (Field field : resultClass.getDeclaredFields()) {
+
+                try {
+                    field.setAccessible(true);
+
+                    Object value = field.get(result);
+
+                    Log.i(
+                            TAG,
+                            "PERFORMANCE d() FIELD "
+                                    + field.getName()
+                                    + " = "
+                                    + String.valueOf(value)
+                    );
+
+                } catch (Throwable e) {
+
+                    Log.i(
+                            TAG,
+                            "PERFORMANCE d() FIELD "
+                                    + field.getName()
+                                    + " READ ERROR = "
+                                    + e.getClass().getName()
+                    );
+                }
+            }
+
+        } catch (Throwable e) {
+
+            Log.e(
+                    TAG,
+                    "PERFORMANCE d() TRACE ERROR",
+                    e
+            );
         }
+
+        return result;
     }
+}
 
     /*
      * ================================================================
