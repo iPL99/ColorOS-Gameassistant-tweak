@@ -70,6 +70,7 @@ public class GyroKrModule extends XposedModule {
 
             installGyroscopeHooks(loader);
             installTouchHooks(loader);
+            installTouchCapabilityHook(loader);
             installFeatureListHook(loader);
             installHyperResponseHook(loader);
 
@@ -258,6 +259,128 @@ public class GyroKrModule extends XposedModule {
                     TAG,
                     "Touch hook ERROR: " + e
             );
+        }
+    }
+
+    /*
+     * ================================================================
+     * NEW: Direct COSASDKManager touch capability hook
+     *
+     * getTouchCustomizedCapability(String):String
+     *
+     * The GameSpace Hyper Response UI gate ultimately reads
+     * touch_customize_capability.showSwiftlyTouchRateUI.
+     * Return the required capability JSON for Korean PUBG.
+     * ================================================================
+     */
+
+    private void installTouchCapabilityHook(ClassLoader loader) {
+
+        try {
+
+            Class<?> clazz = loader.loadClass(
+                    "com.oplus.cosa.COSASDKManager"
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "COSASDKManager capability hook target FOUND"
+            );
+
+            Method target = null;
+
+            for (Method method : clazz.getDeclaredMethods()) {
+
+                if (
+                        "getTouchCustomizedCapability".equals(
+                                method.getName()
+                        )
+                        && method.getParameterCount() == 1
+                        && method.getParameterTypes()[0] == String.class
+                        && method.getReturnType() == String.class
+                ) {
+
+                    target = method;
+                    break;
+                }
+            }
+
+            if (target == null) {
+
+                log(
+                        LOG_ERROR,
+                        TAG,
+                        "getTouchCustomizedCapability(String):String NOT FOUND"
+                );
+
+                return;
+            }
+
+            target.setAccessible(true);
+
+            hook(target).intercept(
+                    new TouchCapabilityHooker()
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "TOUCH CAPABILITY HOOK INSTALLED: "
+                            + target
+            );
+
+        } catch (Throwable e) {
+
+            log(
+                    LOG_ERROR,
+                    TAG,
+                    "Touch capability hook ERROR: " + e
+            );
+        }
+    }
+
+    private class TouchCapabilityHooker
+            implements XposedInterface.Hooker {
+
+        @Override
+        public Object intercept(
+                XposedInterface.Chain chain)
+                throws Throwable {
+
+            Object arg = null;
+
+            if (
+                    chain.getExecutable()
+                            .getParameterCount() >= 1
+            ) {
+                arg = chain.getArg(0);
+            }
+
+            String packageName =
+                    String.valueOf(arg);
+
+            if (
+                    TARGET_GAME.equals(packageName)
+            ) {
+
+                String capability =
+                        "{\"touch_customize_capability\":"
+                                + "{\"showSwiftlyTouchRateUI\":\"1\"}}";
+
+                log(
+                        LOG_INFO,
+                        TAG,
+                        "TOUCH CAPABILITY TARGET HIT: "
+                                + packageName
+                                + " -> "
+                                + capability
+                );
+
+                return capability;
+            }
+
+            return chain.proceed();
         }
     }
 
