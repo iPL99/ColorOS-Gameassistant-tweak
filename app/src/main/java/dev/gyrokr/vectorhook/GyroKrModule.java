@@ -743,7 +743,7 @@ public class GyroKrModule extends XposedModule {
      * ================================================================
      */
 
-    private static class PerformanceSettingDHooker
+    private class PerformanceSettingDHooker
         implements XposedInterface.Hooker {
 
     @Override
@@ -754,40 +754,49 @@ public class GyroKrModule extends XposedModule {
         Object result = chain.proceed();
 
         try {
-            Log.i(
+
+            log(
+                    LOG_INFO,
                     TAG,
                     "PERFORMANCE d() RESULT = "
                             + describePerformanceSetting(result)
             );
 
             if (result == null) {
-                Log.i(
+
+                log(
+                        LOG_INFO,
                         TAG,
                         "PERFORMANCE d() RESULT CLASS = null"
                 );
+
                 return result;
             }
 
-            Class<?> resultClass = result.getClass();
+            Class<?> resultClass =
+                    result.getClass();
 
-            Log.i(
+            log(
+                    LOG_INFO,
                     TAG,
                     "PERFORMANCE d() RESULT CLASS = "
                             + resultClass.getName()
             );
 
-            /*
-             * PerformanceSetting$b 자체의 모든 필드를 출력한다.
-             * 현재 우리가 찾는 것은 touch_rate 관련 실제 값이다.
-             */
-            for (Field field : resultClass.getDeclaredFields()) {
+            for (
+                    Field field :
+                            resultClass.getDeclaredFields()
+            ) {
 
                 try {
+
                     field.setAccessible(true);
 
-                    Object value = field.get(result);
+                    Object value =
+                            field.get(result);
 
-                    Log.i(
+                    log(
+                            LOG_INFO,
                             TAG,
                             "PERFORMANCE d() FIELD "
                                     + field.getName()
@@ -797,7 +806,8 @@ public class GyroKrModule extends XposedModule {
 
                 } catch (Throwable e) {
 
-                    Log.i(
+                    log(
+                            LOG_INFO,
                             TAG,
                             "PERFORMANCE d() FIELD "
                                     + field.getName()
@@ -809,10 +819,11 @@ public class GyroKrModule extends XposedModule {
 
         } catch (Throwable e) {
 
-            Log.e(
+            log(
+                    LOG_ERROR,
                     TAG,
-                    "PERFORMANCE d() TRACE ERROR",
-                    e
+                    "PERFORMANCE d() TRACE ERROR: "
+                            + e
             );
         }
 
