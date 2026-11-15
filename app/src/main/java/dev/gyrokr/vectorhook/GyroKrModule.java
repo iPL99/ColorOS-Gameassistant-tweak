@@ -71,6 +71,7 @@ public class GyroKrModule extends XposedModule {
             installGyroscopeHooks(loader);
             installTouchHooks(loader);
             installFeatureListHook(loader);
+            installHyperResponseHook(loader);
 
             return;
         }
@@ -257,6 +258,121 @@ public class GyroKrModule extends XposedModule {
                     TAG,
                     "Touch hook ERROR: " + e
             );
+        }
+    }
+
+    /*
+     * ================================================================
+     * NEW: Hyper Response capability hook
+     *
+     * RouletteTouchCapabilityHelper.d(String):boolean
+     *
+     * PerfModeFeature.z1() uses this result as one of the conditions
+     * that enables the Hyper Response item.
+     * ================================================================
+     */
+
+    private void installHyperResponseHook(ClassLoader loader) {
+
+        try {
+
+            Class<?> clazz = loader.loadClass(
+                    "com.coloros.gamespaceui.module.performancemode.RouletteTouchCapabilityHelper"
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "RouletteTouchCapabilityHelper FOUND"
+            );
+
+            Method target = null;
+
+            for (Method method : clazz.getDeclaredMethods()) {
+
+                if (
+                        "d".equals(method.getName())
+                        && method.getParameterCount() == 1
+                        && method.getParameterTypes()[0] == String.class
+                        && method.getReturnType() == boolean.class
+                ) {
+
+                    target = method;
+                    break;
+                }
+            }
+
+            if (target == null) {
+
+                log(
+                        LOG_ERROR,
+                        TAG,
+                        "RouletteTouchCapabilityHelper.d(String):boolean NOT FOUND"
+                );
+
+                return;
+            }
+
+            target.setAccessible(true);
+
+            hook(target).intercept(
+                    new HyperResponseHooker()
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "HYPER RESPONSE HOOK INSTALLED: "
+                            + target
+            );
+
+        } catch (Throwable e) {
+
+            log(
+                    LOG_ERROR,
+                    TAG,
+                    "Hyper Response hook ERROR: "
+                            + e
+            );
+        }
+    }
+
+    private class HyperResponseHooker
+            implements XposedInterface.Hooker {
+
+        @Override
+        public Object intercept(
+                XposedInterface.Chain chain)
+                throws Throwable {
+
+            Object arg = null;
+
+            if (
+                    chain.getExecutable()
+                            .getParameterCount() >= 1
+            ) {
+                arg = chain.getArg(0);
+            }
+
+            String packageName =
+                    String.valueOf(arg);
+
+            if (
+                    TARGET_GAME.equals(packageName)
+            ) {
+
+                log(
+                        LOG_INFO,
+                        TAG,
+                        "HYPER RESPONSE TARGET HIT: "
+                                + packageName
+                                + " -> true"
+                );
+
+                return Boolean.TRUE;
+            }
+
+            return chain.proceed();
         }
     }
 
