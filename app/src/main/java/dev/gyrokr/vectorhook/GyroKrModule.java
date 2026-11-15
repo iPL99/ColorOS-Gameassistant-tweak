@@ -1037,9 +1037,24 @@ public class GyroKrModule extends XposedModule {
             XposedInterface.Chain chain)
             throws Throwable {
 
+        Object packageArg = null;
+
+        if (chain.getExecutable().getParameterCount() >= 1) {
+            packageArg = chain.getArg(0);
+        }
+
+        String packageName = String.valueOf(packageArg);
+
         Object result = chain.proceed();
 
         try {
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "PERFORMANCE d() PACKAGE = "
+                            + packageName
+            );
 
             log(
                     LOG_INFO,
@@ -1059,48 +1074,53 @@ public class GyroKrModule extends XposedModule {
                 return result;
             }
 
-            Class<?> resultClass =
-                    result.getClass();
+            /*
+             * PerformanceSetting$b.d is the String field populated from
+             * "touch_customize_capability" by PerformanceSetting$a.a().
+             *
+             * For Korean PUBG, inject the same capability shape used by
+             * the GameSpace Hyper Response UI gate.
+             */
+            if (TARGET_GAME.equals(packageName)) {
 
-            log(
-                    LOG_INFO,
-                    TAG,
-                    "PERFORMANCE d() RESULT CLASS = "
-                            + resultClass.getName()
-            );
+                Class<?> resultClass = result.getClass();
 
-            for (
-                    Field field :
-                            resultClass.getDeclaredFields()
-            ) {
+                Field capabilityField =
+                        resultClass.getDeclaredField("d");
 
-                try {
+                capabilityField.setAccessible(true);
 
-                    field.setAccessible(true);
+                Object before =
+                        capabilityField.get(result);
 
-                    Object value =
-                            field.get(result);
+                String capability =
+                        "{\\\"showSwiftlyTouchRateUI\\\":\\\"1\\\"}";
 
-                    log(
-                            LOG_INFO,
-                            TAG,
-                            "PERFORMANCE d() FIELD "
-                                    + field.getName()
-                                    + " = "
-                                    + String.valueOf(value)
-                    );
+                capabilityField.set(
+                        result,
+                        capability
+                );
 
-                } catch (Throwable e) {
+                log(
+                        LOG_INFO,
+                        TAG,
+                        "HYPER RESPONSE PERFORMANCE d() TARGET HIT: "
+                                + packageName
+                );
 
-                    log(
-                            LOG_INFO,
-                            TAG,
-                            "PERFORMANCE d() FIELD "
-                                    + field.getName()
-                                    + " READ ERROR = "
-                                    + e.getClass().getName()
-                    );
-                }
+                log(
+                        LOG_INFO,
+                        TAG,
+                        "HYPER RESPONSE CAPABILITY BEFORE = "
+                                + String.valueOf(before)
+                );
+
+                log(
+                        LOG_INFO,
+                        TAG,
+                        "HYPER RESPONSE CAPABILITY AFTER = "
+                                + capability
+                );
             }
 
         } catch (Throwable e) {
@@ -1108,7 +1128,7 @@ public class GyroKrModule extends XposedModule {
             log(
                     LOG_ERROR,
                     TAG,
-                    "PERFORMANCE d() TRACE ERROR: "
+                    "PERFORMANCE d() CAPABILITY INJECT ERROR: "
                             + e
             );
         }
