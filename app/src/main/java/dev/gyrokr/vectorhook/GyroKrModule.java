@@ -443,72 +443,119 @@ public class GyroKrModule extends XposedModule {
      */
 
     private void installCosaNetworkParserHook(
-            ClassLoader loader) {
+        ClassLoader loader) {
 
-        try {
+    try {
 
-            Class<?> clazz =
-                    loader.loadClass("v8.e");
+        Class<?> clazz =
+                loader.loadClass("v8.e");
 
-            log(
-                    LOG_INFO,
-                    TAG,
-                    "v8.e FOUND"
-            );
+        log(
+                LOG_INFO,
+                TAG,
+                "v8.e FOUND"
+        );
 
-            Method target = null;
+        Method target = null;
 
-            for (Method method : clazz.getDeclaredMethods()) {
+        for (Method method : clazz.getDeclaredMethods()) {
 
-                if (
-                        "d".equals(method.getName())
-                        && method.getParameterCount() == 2
-                        && method.getParameterTypes()[0] == String.class
-                        && method.getParameterTypes()[1] == String.class
-                        && java.util.HashMap.class.isAssignableFrom(
-                                method.getReturnType()
-                        )
-                ) {
+            if (
+                    "d".equals(method.getName())
+                    && method.getParameterCount() == 2
+                    && method.getParameterTypes()[0] == String.class
+                    && method.getParameterTypes()[1] == String.class
+                    && java.util.HashMap.class.isAssignableFrom(
+                            method.getReturnType()
+                    )
+            ) {
 
-                    target = method;
-                    break;
-                }
+                target = method;
+                break;
             }
+        }
 
-            if (target == null) {
-
-                log(
-                        LOG_ERROR,
-                        TAG,
-                        "v8.e.d(String,String):HashMap NOT FOUND"
-                );
-
-                return;
-            }
-
-            target.setAccessible(true);
-
-            hook(target).intercept(
-                    new CosaNetworkParserHooker()
-            );
-
-            log(
-                    LOG_INFO,
-                    TAG,
-                    "COSA NETWORK PARSER HOOK INSTALLED: "
-                            + target
-            );
-
-        } catch (Throwable e) {
+        if (target == null) {
 
             log(
                     LOG_ERROR,
                     TAG,
-                    "COSA network parser hook ERROR: "
-                            + e
+                    "v8.e.d(String,String):HashMap NOT FOUND"
+            );
+
+            return;
+        }
+
+        target.setAccessible(true);
+
+        hook(target).intercept(
+                new CosaNetworkParserHooker()
+        );
+
+        log(
+                LOG_INFO,
+                TAG,
+                "COSA NETWORK PARSER HOOK INSTALLED: "
+                        + target
+        );
+
+
+        /*
+         * ============================================================
+         * v8.e.b(String, boolean)
+         * ============================================================
+         */
+
+        Method packageConfigTarget = null;
+
+        for (Method method : clazz.getDeclaredMethods()) {
+
+            if (
+                    "b".equals(method.getName())
+                    && method.getParameterCount() == 2
+                    && method.getParameterTypes()[0] == String.class
+                    && method.getParameterTypes()[1] == boolean.class
+            ) {
+
+                packageConfigTarget = method;
+                break;
+            }
+        }
+
+        if (packageConfigTarget == null) {
+
+            log(
+                    LOG_ERROR,
+                    TAG,
+                    "v8.e.b(String,boolean) NOT FOUND"
+            );
+
+        } else {
+
+            packageConfigTarget.setAccessible(true);
+
+            hook(packageConfigTarget).intercept(
+                    new CosaNetworkPackageHooker()
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "COSA PACKAGE CONFIG HOOK INSTALLED: "
+                            + packageConfigTarget
             );
         }
+
+    } catch (Throwable e) {
+
+        log(
+                LOG_ERROR,
+                TAG,
+                "COSA network parser hook ERROR: "
+                        + e
+        );
     }
+}
 
     /*
      * ================================================================
@@ -837,6 +884,79 @@ public class GyroKrModule extends XposedModule {
      * ================================================================
      */
 
+    /*
+ * ================================================================
+ * NEW: v8.e.b(String,boolean) hooker
+ * ================================================================
+ */
+
+private class CosaNetworkPackageHooker
+        implements XposedInterface.Hooker {
+
+    @Override
+    public Object intercept(
+            XposedInterface.Chain chain)
+            throws Throwable {
+
+        Object arg0 = null;
+        Object arg1 = null;
+
+        if (chain.getExecutable().getParameterCount() >= 1) {
+
+            arg0 = chain.getArg(0);
+        }
+
+        if (chain.getExecutable().getParameterCount() >= 2) {
+
+            arg1 = chain.getArg(1);
+        }
+
+        String input =
+                String.valueOf(arg0);
+
+        boolean targetHit =
+                input.contains(TARGET_GAME);
+
+        if (targetHit) {
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "COSA PACKAGE CONFIG TARGET HIT"
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "COSA PACKAGE CONFIG INPUT = "
+                            + input
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "COSA PACKAGE CONFIG FLAG = "
+                            + String.valueOf(arg1)
+            );
+        }
+
+        Object result =
+                chain.proceed();
+
+        if (targetHit) {
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "COSA PACKAGE CONFIG RESULT = "
+                            + String.valueOf(result)
+            );
+        }
+
+        return result;
+    }
+}
+    
     private class CosaNetworkParserHooker
             implements XposedInterface.Hooker {
 
