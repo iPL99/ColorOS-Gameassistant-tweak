@@ -90,6 +90,7 @@ public class GyroKrModule extends XposedModule {
 
             installPerformanceSettingHooks(loader);
             installCosaNetworkParserHook(loader);
+            installDBARouterServiceHook(loader);
 
             return;
         }
@@ -930,4 +931,187 @@ public class GyroKrModule extends XposedModule {
                 + "]";
     }
   }
+   /*
+ * ================================================================
+ * NEW: DBARouterService.T(Lt9.s) hook
+ * ================================================================
+ */
+private void installDBARouterServiceHook(ClassLoader loader) {
+
+    try {
+
+        Class<?> dbaClass =
+                loader.loadClass(
+                        "com.oplus.common.db.service.DBARouterService"
+                );
+
+        log(
+                LOG_INFO,
+                TAG,
+                "DBARouterService FOUND"
+        );
+
+        Method target = null;
+
+        for (Method method : dbaClass.getDeclaredMethods()) {
+
+            if (!"T".equals(method.getName())) {
+                continue;
+            }
+
+            Class<?>[] params =
+                    method.getParameterTypes();
+
+            if (
+                    params.length == 1
+                    && params[0].getName().equals("t9.s")
+            ) {
+                target = method;
+                break;
+            }
+        }
+
+        if (target == null) {
+
+            log(
+                    LOG_ERROR,
+                    TAG,
+                    "DBARouterService.T(Lt9.s) NOT FOUND"
+            );
+
+            return;
+        }
+
+        target.setAccessible(true);
+
+        hook(target).intercept(
+                new DBARouterTHooker()
+        );
+
+        log(
+                LOG_INFO,
+                TAG,
+                "DBARouterService.T(Lt9.s) HOOK INSTALLED: "
+                        + target
+        );
+
+    } catch (Throwable e) {
+
+        log(
+                LOG_ERROR,
+                TAG,
+                "DBARouterService hook ERROR: "
+                        + e
+        );
+    }
+}
+
+private class DBARouterTHooker
+        implements XposedInterface.Hooker {
+
+    @Override
+    public Object intercept(
+            XposedInterface.Chain chain)
+            throws Throwable {
+
+        Object config = null;
+
+        if (
+                chain.getExecutable()
+                        .getParameterCount() >= 1
+        ) {
+            config = chain.getArg(0);
+        }
+
+        String className =
+                config == null
+                        ? "null"
+                        : config.getClass().getName();
+
+        String packageName = null;
+        String refreshRate = null;
+
+        if (config != null) {
+
+            try {
+                Method d =
+                        config.getClass()
+                                .getDeclaredMethod("D");
+
+                d.setAccessible(true);
+
+                packageName =
+                        String.valueOf(
+                                d.invoke(config)
+                        );
+
+            } catch (Throwable ignored) {
+            }
+
+            try {
+                Method g =
+                        config.getClass()
+                                .getDeclaredMethod("G");
+
+                g.setAccessible(true);
+
+                refreshRate =
+                        String.valueOf(
+                                g.invoke(config)
+                        );
+
+            } catch (Throwable ignored) {
+            }
+        }
+
+        if (
+                TARGET_GAME.equals(packageName)
+        ) {
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "DBA T TARGET HIT"
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "DBA T CONFIG CLASS = "
+                            + className
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "DBA T PACKAGE = "
+                            + packageName
+            );
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "DBA T REFRESH RATE = "
+                            + refreshRate
+            );
+        }
+
+        Object result =
+                chain.proceed();
+
+        if (
+                TARGET_GAME.equals(packageName)
+        ) {
+
+            log(
+                    LOG_INFO,
+                    TAG,
+                    "DBA T RESULT = "
+                            + String.valueOf(result)
+            );
+        }
+
+        return result;
+    }
+ } 
 }
