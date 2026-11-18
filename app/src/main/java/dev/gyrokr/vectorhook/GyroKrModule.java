@@ -1430,7 +1430,7 @@ public class GyroKrModule extends XposedModule {
     // Observation only: no arguments, return values, or fields are modified.
     private void installPerfTouchModelTraceHook(ClassLoader loader) {
         String[] names = new String[] {
-                "eya", "sgc", "vfc", "bgc", "zfc", "wfc",
+                "eya", "mgc", "sgc", "vfc", "bgc", "zfc", "wfc",
                 "business.module.performance.settings.touch.e",
                 "business.module.performance.settings.touch.g"
         };
@@ -1439,12 +1439,25 @@ public class GyroKrModule extends XposedModule {
             try {
                 Class<?> clazz = loader.loadClass(name);
                 log(LOG_INFO, TAG, "MODEL TRACE CLASS FOUND: " + name);
+                if ("mgc".equals(name)) {
+                    Class<?> parent = clazz;
+                    while (parent != null) {
+                        log(LOG_INFO, TAG, "MG C CLASS HIERARCHY: " + parent.getName());
+                        for (Field field : parent.getDeclaredFields()) {
+                            log(LOG_INFO, TAG, "MG C FIELD DECL: " + field);
+                        }
+                        for (Method declared : parent.getDeclaredMethods()) {
+                            log(LOG_INFO, TAG, "MG C METHOD DECL: " + declared);
+                        }
+                        parent = parent.getSuperclass();
+                    }
+                }
                 for (Method method : clazz.getDeclaredMethods()) {
                     if (Modifier.isAbstract(method.getModifiers())
                             || Modifier.isNative(method.getModifiers())) continue;
                     // Keep the trace focused on list/model-building methods.
                     String mn = method.getName().toLowerCase();
-                    if (!(name.equals("eya") || mn.contains("touch")
+                    if (!(name.equals("eya") || name.equals("mgc") || mn.contains("touch")
                             || mn.contains("response") || mn.contains("perf")
                             || mn.contains("type") || mn.contains("item")
                             || mn.contains("list") || mn.equals("a")
@@ -1461,9 +1474,24 @@ public class GyroKrModule extends XposedModule {
                             }
                             log(LOG_INFO, TAG, "MODEL TRACE CALL: " + method
                                     + " args=[" + args + "] this=" + safeToString(thiz));
+                            if ("mgc".equals(clazz.getName())) {
+                                dumpObjectShallow("MG C BEFORE THIS", thiz, 3, 100);
+                                for (int i = 0; i < method.getParameterCount(); i++) {
+                                    Object arg = chain.getArg(i);
+                                    if (arg != null && "mgc".equals(arg.getClass().getName())) {
+                                        dumpObjectShallow("MG C BEFORE ARG" + i, arg, 3, 100);
+                                    }
+                                }
+                            }
                             Object result = chain.proceed();
                             log(LOG_INFO, TAG, "MODEL TRACE RESULT: " + method
                                     + " -> " + safeToString(result));
+                            if ("mgc".equals(clazz.getName())) {
+                                dumpObjectShallow("MG C AFTER THIS", thiz, 3, 100);
+                                if (result != null && "mgc".equals(result.getClass().getName())) {
+                                    dumpObjectShallow("MG C RESULT OBJECT", result, 3, 100);
+                                }
+                            }
                             if ("eya".equals(clazz.getName()) && thiz != null) {
                                 dumpNamedField("MODEL TRACE eya.j", thiz, "j");
                             }
@@ -1501,6 +1529,9 @@ public class GyroKrModule extends XposedModule {
                         log(LOG_INFO, TAG, label + "[" + i + "] CLASS="
                                 + (item == null ? "null" : item.getClass().getName())
                                 + " VALUE=" + safeToString(item));
+                        if (item != null && "mgc".equals(item.getClass().getName())) {
+                            dumpObjectShallow(label + "[" + i + "] MG C DETAILS", item, 3, 100);
+                        }
                     }
                 }
                 return;
