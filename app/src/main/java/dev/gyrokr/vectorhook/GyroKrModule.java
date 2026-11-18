@@ -46,6 +46,9 @@ public class GyroKrModule extends XposedModule {
             installTouchHooks(loader);
             installFeatureListHook(loader);
             installGameSpaceUiTraceHooks(loader);
+
+            // APK 내부 Hyper Response 실제 UI 판정 경로 추적
+            installHyperResponseApkTraceHooks(loader);
             return;
         }
 
@@ -1286,6 +1289,160 @@ public class GyroKrModule extends XposedModule {
                             + packageName + ") forced=true");
 
             return Boolean.TRUE;
+        }
+    }
+
+    // ================================================================
+    // games_10445.apk reverse-engineering trace
+    // Read-only: does not force support results or alter UI state.
+    // Confirmed APK path:
+    // PerfModeFeature.D0() -> ICOSASDKManager.isSupportTouchResponse()
+    // TouchRespondGunGodModeBiz.isSupport(String) -> PerfModeFeature.D0()
+    // ================================================================
+
+    private void installHyperResponseApkTraceHooks(ClassLoader loader) {
+        traceApkMethods(
+                loader,
+                "com.coloros.gamespaceui.module.performancemode.PerfModeFeature",
+                new String[]{"D0"},
+                "HYPER SUPPORT GATE"
+        );
+
+        traceApkMethods(
+                loader,
+                "business.module.performance.settings.touch.TouchRespondGunGodModeBiz",
+                new String[]{
+                        "isSupport",
+                        "defaultStateDuring",
+                        "isExternalStateChangeAllowed",
+                        "saveState",
+                        "changeState"
+                },
+                "TOUCH RESPONSE BIZ"
+        );
+
+        // Obfuscated helper used by PerfTouchSettingFragment's visibility check.
+        traceApkMethods(
+                loader,
+                "business.module.performance.settings.touch.d",
+                new String[]{"c", "d", "e", "f", "g", "h", "i"},
+                "TOUCH STATE HELPER"
+        );
+
+        // Parent page: E() starts checkRefreshRateAndTouchResponseVisibility.
+        traceApkMethods(
+                loader,
+                "business.module.performance.settings.fragment.PerfTouchSettingFragment",
+                new String[]{
+                        "E",
+                        "I",
+                        "N",
+                        "initRecyclerView",
+                        "initObserver",
+                        "K",
+                        "onDestroy"
+                },
+                "TOUCH SETTINGS LIST"
+        );
+
+        // The RecyclerView row which leads into touch-response settings.
+        traceApkMethods(
+                loader,
+                "business.module.performance.settings.touch.PerfTouchViewRespondVH",
+                new String[]{"B", "C", "D", "E", "p", "q", "x", "y", "H", "r"},
+                "TOUCH RESPONSE ROW"
+        );
+
+        // Final settings page lifecycle and state binding.
+        traceApkMethods(
+                loader,
+                "business.module.performance.settings.fragment.TouchResponseUltimateSettingFragment",
+                new String[]{
+                        "onCreate",
+                        "initView",
+                        "onResume",
+                        "bindSwitch",
+                        "refreshSwitchState",
+                        "observeTouchResponseChange",
+                        "isPort",
+                        "isPortPerfDesktopMode",
+                        "getTitleText"
+                },
+                "TOUCH RESPONSE FRAGMENT"
+        );
+    }
+
+    private void traceApkMethods(
+            ClassLoader loader,
+            String className,
+            String[] methodNames,
+            String traceLabel
+    ) {
+        try {
+            Class<?> clazz = loader.loadClass(className);
+            int installed = 0;
+
+            for (Method method : clazz.getDeclaredMethods()) {
+                boolean match = false;
+                for (String methodName : methodNames) {
+                    if (methodName.equals(method.getName())) {
+                        match = true;
+                        break;
+                    }
+                }
+                if (!match) continue;
+
+                method.setAccessible(true);
+                hook(method).intercept(new ApkMethodTraceHooker(traceLabel));
+                log(LOG_INFO, TAG,
+                        traceLabel + " HOOK INSTALLED: " + method);
+                installed++;
+            }
+
+            log(LOG_INFO, TAG,
+                    traceLabel + " HOOK COUNT = " + installed
+                            + " class=" + className);
+
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG,
+                    traceLabel + " HOOK ERROR class=" + className
+                            + " error=" + e);
+        }
+    }
+
+    private class ApkMethodTraceHooker implements XposedInterface.Hooker {
+
+        private final String traceLabel;
+
+        ApkMethodTraceHooker(String traceLabel) {
+            this.traceLabel = traceLabel;
+        }
+
+        @Override
+        public Object intercept(
+                XposedInterface.Chain chain
+        ) throws Throwable {
+
+            Method method = (Method) chain.getExecutable();
+            StringBuilder args = new StringBuilder();
+
+            for (int i = 0; i < method.getParameterCount(); i++) {
+                if (i > 0) args.append(", ");
+                args.append("arg").append(i).append("=")
+                        .append(String.valueOf(chain.getArg(i)));
+            }
+
+            log(LOG_INFO, TAG,
+                    traceLabel + " CALL: " + method.getDeclaringClass().getName()
+                            + "." + method.getName() + "(" + args + ")");
+
+            Object result = chain.proceed();
+
+            log(LOG_INFO, TAG,
+                    traceLabel + " RESULT: " + method.getName()
+                            + " = " + String.valueOf(result));
+
+            return result;
         }
     }
 
