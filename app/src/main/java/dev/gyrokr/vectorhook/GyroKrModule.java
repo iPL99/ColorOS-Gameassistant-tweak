@@ -1389,6 +1389,13 @@ public class GyroKrModule extends XposedModule {
                     "business.module.performance.settings.fragment.PerfTouchSettingFragment"
             );
 
+            log(LOG_INFO, TAG, "TOUCH FRAGMENT METHOD INVENTORY BEGIN");
+            for (Method declared : clazz.getDeclaredMethods()) {
+                log(LOG_INFO, TAG, "TOUCH FRAGMENT METHOD DECL = " + declared
+                        + " modifiers=" + Modifier.toString(declared.getModifiers()));
+            }
+            log(LOG_INFO, TAG, "TOUCH FRAGMENT METHOD INVENTORY END");
+
             int installed = 0;
             for (Method method : clazz.getDeclaredMethods()) {
                 if (!"K".equals(method.getName())) continue;
@@ -1404,6 +1411,8 @@ public class GyroKrModule extends XposedModule {
 
                         dumpObjectShallow("K ARG0", arg0, 2, 80);
                         dumpFieldsShallow("K THIS BEFORE", thiz, 1, 100);
+                        // Capture the Lazy initializer before Kotlin clears it after evaluation.
+                        inspectLazyField("K THIS BEFORE h", thiz, "h");
 
                         Object result = chain.proceed();
 
@@ -1503,6 +1512,21 @@ public class GyroKrModule extends XposedModule {
 
             for (Field field : clazz.getDeclaredFields()) {
                 log(LOG_INFO, TAG, "WIH FIELD DECL = " + field);
+                if (Modifier.isStatic(field.getModifiers())) {
+                    try {
+                        field.setAccessible(true);
+                        Object value = field.get(null);
+                        log(LOG_INFO, TAG, "WIH STATIC FIELD VALUE " + field.getName()
+                                + " CLASS=" + (value == null ? "null" : value.getClass().getName())
+                                + " VALUE=" + safeToString(value));
+                        if (value != null) {
+                            dumpObjectShallow("WIH STATIC " + field.getName(), value, 2, 80);
+                        }
+                    } catch (Throwable e) {
+                        log(LOG_INFO, TAG, "WIH STATIC FIELD READ ERROR " + field.getName()
+                                + " = " + e);
+                    }
+                }
             }
         } catch (Throwable e) {
             log(LOG_ERROR, TAG, "WIH TRACE INSTALL ERROR = " + e);
