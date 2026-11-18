@@ -979,7 +979,69 @@ public class GyroKrModule extends XposedModule {
                             + " = "
                             + String.valueOf(result));
 
+            if ("gameStart".equals(methodName) && args != null) {
+                dumpExtremeTouchArgument(chain.getArg(0));
+            }
+
             return result;
+        }
+    }
+
+    // ================================================================
+    // Read-only inspection of the object passed to gameStart().
+    // ================================================================
+
+    private void dumpExtremeTouchArgument(Object arg) {
+        if (arg == null) {
+            log(LOG_INFO, TAG, "EXTREME TOUCH ARG DUMP: null");
+            return;
+        }
+
+        try {
+            Class<?> c = arg.getClass();
+            log(LOG_INFO, TAG,
+                    "EXTREME TOUCH ARG CLASS = " + c.getName());
+
+            Class<?> owner = c;
+            int count = 0;
+
+            while (owner != null && owner != Object.class && count < 80) {
+                for (Field field : owner.getDeclaredFields()) {
+                    if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                        continue;
+                    }
+
+                    try {
+                        field.setAccessible(true);
+                        Object value = field.get(arg);
+                        String text = String.valueOf(value);
+
+                        if (text.length() > 300) {
+                            text = text.substring(0, 300) + "...";
+                        }
+
+                        log(LOG_INFO, TAG,
+                                "EXTREME TOUCH ARG FIELD: "
+                                        + field.getName()
+                                        + " = "
+                                        + text);
+                    } catch (Throwable ignored) {
+                        log(LOG_INFO, TAG,
+                                "EXTREME TOUCH ARG FIELD ERROR: "
+                                        + field.getName());
+                    }
+
+                    count++;
+                    if (count >= 80) {
+                        break;
+                    }
+                }
+
+                owner = owner.getSuperclass();
+            }
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG,
+                    "EXTREME TOUCH ARG DUMP ERROR: " + e);
         }
     }
 
