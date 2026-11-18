@@ -468,6 +468,12 @@ public class GyroKrModule extends XposedModule {
                     "PERFORMANCE a() RESULT = "
                             + describePerformanceSetting(result));
 
+            forceTouchRateEnabled(result);
+
+            log(LOG_INFO, TAG,
+                    "PERFORMANCE a() RESULT AFTER TOUCH FORCE = "
+                            + describePerformanceSetting(result));
+
             return result;
         }
     }
@@ -492,6 +498,12 @@ public class GyroKrModule extends XposedModule {
 
                 log(LOG_INFO, TAG,
                         "PERFORMANCE d() RESULT = "
+                                + describePerformanceSetting(result));
+
+                forceTouchRateEnabled(result);
+
+                log(LOG_INFO, TAG,
+                        "PERFORMANCE d() RESULT AFTER TOUCH FORCE = "
                                 + describePerformanceSetting(result));
             }
 
@@ -1054,6 +1066,107 @@ public class GyroKrModule extends XposedModule {
     // ================================================================
     // Reflection helper
     // ================================================================
+
+    // ================================================================
+    // Confirmed TouchRateConfigState force
+    //
+    // PerformanceSetting$b.l -> TouchRateConfigState
+    // TouchRateConfigState.a -> isTouchModeTouchRateEnabled
+    //
+    // Only the PUBG KR package is forced.
+    // ================================================================
+
+    private void forceTouchRateEnabled(Object performanceSetting) {
+        if (performanceSetting == null) {
+            return;
+        }
+
+        try {
+            Field stateField = null;
+            Class<?> owner = performanceSetting.getClass();
+
+            while (owner != null && stateField == null) {
+                try {
+                    stateField = owner.getDeclaredField("l");
+                } catch (NoSuchFieldException ignored) {
+                    owner = owner.getSuperclass();
+                }
+            }
+
+            if (stateField == null) {
+                log(LOG_ERROR, TAG,
+                        "TOUCH FORCE: field l NOT FOUND in "
+                                + performanceSetting.getClass().getName());
+                return;
+            }
+
+            stateField.setAccessible(true);
+            Object state = stateField.get(performanceSetting);
+
+            if (state == null) {
+                log(LOG_ERROR, TAG,
+                        "TOUCH FORCE: l state=null");
+                return;
+            }
+
+            Field enabledField = null;
+            owner = state.getClass();
+
+            while (owner != null && enabledField == null) {
+                try {
+                    enabledField = owner.getDeclaredField("a");
+                } catch (NoSuchFieldException ignored) {
+                    owner = owner.getSuperclass();
+                }
+            }
+
+            if (enabledField == null
+                    || enabledField.getType() != boolean.class) {
+                log(LOG_ERROR, TAG,
+                        "TOUCH FORCE: nested boolean field a NOT FOUND in "
+                                + state.getClass().getName());
+                return;
+            }
+
+            enabledField.setAccessible(true);
+
+            boolean before = enabledField.getBoolean(state);
+
+            if (TARGET_GAME.equals(getCurrentTouchForcePackage(performanceSetting))) {
+                log(LOG_INFO, TAG,
+                        "TOUCH FORCE BEFORE: l.a=" + before
+                                + " nestedClass="
+                                + state.getClass().getName());
+
+                enabledField.setBoolean(state, true);
+
+                boolean after = enabledField.getBoolean(state);
+
+                log(LOG_INFO, TAG,
+                        "TOUCH FORCE AFTER: l.a=" + after);
+
+                log(LOG_INFO, TAG,
+                        "TOUCH FORCE APPLIED: "
+                                + TARGET_GAME
+                                + " -> l.a=true");
+            }
+
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG,
+                    "TOUCH FORCE ERROR: " + e);
+        }
+    }
+
+    /*
+     * PerformanceSetting$a.a() does not pass the package directly in the
+     * returned object. For this test, use the known target because the hook
+     * is reached while the target game's configuration is being processed.
+     *
+     * The d(String) path is already target-filtered before this helper runs.
+     */
+    private String getCurrentTouchForcePackage(Object performanceSetting) {
+        return TARGET_GAME;
+    }
 
     private String describePerformanceSetting(
             Object object
