@@ -45,6 +45,7 @@ public class GyroKrModule extends XposedModule {
             // Hyper Response 엔진 관찰 전용
             installTouchHooks(loader);
             installFeatureListHook(loader);
+            installGameSpaceUiTraceHooks(loader);
             return;
         }
 
@@ -232,6 +233,72 @@ public class GyroKrModule extends XposedModule {
                     "TOUCH RESULT: " + method.getName()
                             + " = " + String.valueOf(result));
 
+            return result;
+        }
+    }
+
+    // ================================================================
+    // GameSpace UI decision tracing
+    // Read-only: traces likely UI support/availability methods without
+    // forcing their return values.
+    // ================================================================
+
+    private void installGameSpaceUiTraceHooks(ClassLoader loader) {
+        try {
+            Class<?> clazz = loader.loadClass(
+                    "com.oplus.cosa.COSASDKManager"
+            );
+
+            int installed = 0;
+            for (Method method : clazz.getDeclaredMethods()) {
+                if (Modifier.isStatic(method.getModifiers())) continue;
+                if (method.getReturnType() != boolean.class
+                        && method.getReturnType() != String.class) continue;
+
+                String n = method.getName().toLowerCase();
+                boolean relevant = n.contains("touch")
+                        || n.contains("extreme")
+                        || n.contains("response")
+                        || n.contains("support")
+                        || n.contains("feature")
+                        || n.contains("enable")
+                        || n.contains("available")
+                        || n.contains("allow")
+                        || n.contains("multi");
+                if (!relevant) continue;
+
+                boolean hasString = false;
+                for (Class<?> p : method.getParameterTypes()) {
+                    if (p == String.class) { hasString = true; break; }
+                }
+                if (!hasString && method.getParameterCount() > 0) continue;
+
+                method.setAccessible(true);
+                hook(method).intercept(new GameSpaceUiTraceHooker());
+                log(LOG_INFO, TAG, "UI TRACE HOOK INSTALLED: " + method);
+                installed++;
+            }
+            log(LOG_INFO, TAG, "UI TRACE HOOKS INSTALLED = " + installed);
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG, "GameSpace UI trace ERROR: " + e);
+        }
+    }
+
+    private class GameSpaceUiTraceHooker implements XposedInterface.Hooker {
+        @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
+            Method m = (Method) chain.getExecutable();
+            boolean target = false;
+            StringBuilder a = new StringBuilder();
+            for (int i=0;i<m.getParameterCount();i++) {
+                Object v=chain.getArg(i);
+                if (i>0) a.append(", ");
+                a.append("arg").append(i).append("=").append(String.valueOf(v));
+                if (TARGET_GAME.equals(v)) target=true;
+            }
+            Object result=chain.proceed();
+            if (target || m.getParameterCount()==0) {
+                log(LOG_INFO,TAG,"UI DECISION: " + m.getName() + "(" + a + ") -> " + String.valueOf(result));
+            }
             return result;
         }
     }
