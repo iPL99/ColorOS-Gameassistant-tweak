@@ -49,6 +49,7 @@ public class GyroKrModule extends XposedModule {
 
             // APK 내부 Hyper Response 실제 UI 판정 경로 추적
             installHyperResponseApkTraceHooks(loader);
+            installPerfTouchKDumpHook(loader);
             return;
         }
 
@@ -1370,6 +1371,142 @@ public class GyroKrModule extends XposedModule {
                 },
                 "TOUCH RESPONSE FRAGMENT"
         );
+    }
+
+    // ================================================================
+    // Next-stage UI blocker trace:
+    // PerfTouchSettingFragment.K(eya) is reached and D0() is TRUE,
+    // but no Hyper Response row is created. Dump the K argument and
+    // fragment fields before/after K so we can identify the false gate
+    // or list/model object without changing behavior.
+    // ================================================================
+
+    private void installPerfTouchKDumpHook(ClassLoader loader) {
+        try {
+            Class<?> clazz = loader.loadClass(
+                    "business.module.performance.settings.fragment.PerfTouchSettingFragment"
+            );
+
+            int installed = 0;
+            for (Method method : clazz.getDeclaredMethods()) {
+                if (!"K".equals(method.getName())) continue;
+                method.setAccessible(true);
+
+                hook(method).intercept(new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        log(LOG_INFO, TAG, "K DUMP CALL: " + method);
+
+                        Object thiz = chain.getThisObject();
+                        Object arg0 = method.getParameterCount() > 0 ? chain.getArg(0) : null;
+
+                        dumpObjectShallow("K ARG0", arg0, 2, 80);
+                        dumpFieldsShallow("K THIS BEFORE", thiz, 1, 100);
+
+                        Object result = chain.proceed();
+
+                        dumpFieldsShallow("K THIS AFTER", thiz, 2, 160);
+                        if (result != null) {
+                            dumpObjectShallow("K RESULT", result, 2, 120);
+                        }
+                        log(LOG_INFO, TAG, "K DUMP RESULT: " + String.valueOf(result));
+                        return result;
+                    }
+                });
+
+                log(LOG_INFO, TAG, "K DUMP HOOK INSTALLED: " + method);
+                installed++;
+            }
+
+            log(LOG_INFO, TAG, "K DUMP HOOK COUNT = " + installed);
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG, "K DUMP HOOK ERROR: " + e);
+        }
+    }
+
+    private void dumpObjectShallow(String label, Object obj, int depth, int maxFields) {
+        if (obj == null) {
+            log(LOG_INFO, TAG, label + " = null");
+            return;
+        }
+
+        log(LOG_INFO, TAG, label + " CLASS = " + obj.getClass().getName());
+        log(LOG_INFO, TAG, label + " STR = " + safeToString(obj));
+
+        if (depth > 0) {
+            dumpFieldsShallow(label, obj, depth, maxFields);
+        }
+    }
+
+    private void dumpFieldsShallow(String label, Object obj, int depth, int maxFields) {
+        if (obj == null) return;
+
+        Class<?> owner = obj.getClass();
+        int count = 0;
+
+        while (owner != null && count < maxFields) {
+            Field[] fields;
+            try {
+                fields = owner.getDeclaredFields();
+            } catch (Throwable e) {
+                break;
+            }
+
+            for (Field field : fields) {
+                if (count++ >= maxFields) break;
+                if (Modifier.isStatic(field.getModifiers())) continue;
+                if (field.isSynthetic()) continue;
+
+                try {
+                    field.setAccessible(true);
+                    Object value = field.get(obj);
+                    String valueText = safeToString(value);
+                    log(LOG_INFO, TAG,
+                            label + " FIELD " + owner.getSimpleName() + "."
+                                    + field.getName() + " ["
+                                    + field.getType().getName() + "] = " + valueText);
+
+                    // Only recurse into small custom objects. Avoid Android UI,
+                    // collections and strings because those can explode the log.
+                    if (depth > 1 && value != null
+                            && !field.getType().isPrimitive()
+                            && !value.getClass().isArray()
+                            && !(value instanceof String)
+                            && !(value instanceof Number)
+                            && !(value instanceof Boolean)
+                            && !(value instanceof Enum)
+                            && !(value instanceof List)
+                            && !value.getClass().getName().startsWith("android.")
+                            && !value.getClass().getName().startsWith("java.")) {
+                        dumpFieldsShallow(
+                                label + " -> " + field.getName(),
+                                value,
+                                depth - 1,
+                                Math.min(30, maxFields - count + 1)
+                        );
+                    }
+                } catch (Throwable ignored) {
+                    log(LOG_INFO, TAG,
+                            label + " FIELD " + owner.getSimpleName() + "."
+                                    + field.getName() + " = <read error>");
+                }
+            }
+
+            owner = owner.getSuperclass();
+        }
+    }
+
+    private String safeToString(Object value) {
+        if (value == null) return "null";
+        try {
+            String s = String.valueOf(value);
+            if (s.length() > 500) {
+                return s.substring(0, 500) + "...";
+            }
+            return s;
+        } catch (Throwable e) {
+            return "<toString error>";
+        }
     }
 
     private void traceApkMethods(
