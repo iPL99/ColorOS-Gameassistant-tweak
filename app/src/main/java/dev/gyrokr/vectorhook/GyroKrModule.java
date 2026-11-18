@@ -6,6 +6,8 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
@@ -20,6 +22,9 @@ public class GyroKrModule extends XposedModule {
 
     private static final int LOG_INFO = 4;
     private static final int LOG_ERROR = 6;
+
+    // Adapters passed to PerfTouchSettingFragment.K(eya).
+    private final Map<Object, Boolean> hyperResponseTargetAdapters = new WeakHashMap<>();
 
     public GyroKrModule() {
         super();
@@ -1471,6 +1476,18 @@ public class GyroKrModule extends XposedModule {
             log(LOG_INFO, TAG, "HYPER ROW EYA i(List) HOOK COUNT = " + iCount);
         } catch (Throwable t) {
             log(LOG_ERROR, TAG, "HYPER ROW EYA i(List) HOOK ERROR: " + t);
+        }
+    }
+
+    private void notifyAdapterDataChanged(Object adapter) {
+        if (adapter == null) return;
+        try {
+            Method notify = adapter.getClass().getMethod("notifyDataSetChanged");
+            notify.setAccessible(true);
+            notify.invoke(adapter);
+            log(LOG_INFO, TAG, "HYPER ROW notifyDataSetChanged() CALLED");
+        } catch (Throwable t) {
+            log(LOG_INFO, TAG, "HYPER ROW notifyDataSetChanged() SKIP: " + t.getClass().getSimpleName());
         }
     }
 
