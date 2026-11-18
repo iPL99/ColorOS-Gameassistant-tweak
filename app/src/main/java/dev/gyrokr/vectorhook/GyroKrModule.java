@@ -79,8 +79,7 @@ public class GyroKrModule extends XposedModule {
             // ExtremeTouch / Hyper Response 실제 진입점 관찰
             installExtremeTouchHooks(loader);
 
-            // PUBG KR에서 ExtremeTouch 지원 판정만 테스트
-            installExtremeTouchForceHook(loader);
+            // UI/navigation tracing only. Do not force the device support gate.
         }
     }
 
@@ -550,12 +549,6 @@ public class GyroKrModule extends XposedModule {
                     "PERFORMANCE a() RESULT = "
                             + describePerformanceSetting(result));
 
-            forceTouchRateEnabled(result);
-
-            log(LOG_INFO, TAG,
-                    "PERFORMANCE a() RESULT AFTER TOUCH FORCE = "
-                            + describePerformanceSetting(result));
-
             return result;
         }
     }
@@ -582,11 +575,6 @@ public class GyroKrModule extends XposedModule {
                         "PERFORMANCE d() RESULT = "
                                 + describePerformanceSetting(result));
 
-                forceTouchRateEnabled(result);
-
-                log(LOG_INFO, TAG,
-                        "PERFORMANCE d() RESULT AFTER TOUCH FORCE = "
-                                + describePerformanceSetting(result));
             }
 
             return result;
@@ -1393,88 +1381,75 @@ public class GyroKrModule extends XposedModule {
     // ================================================================
 
     private void installPerfTouchCoroutineTraceHooks(ClassLoader loader) {
-        String base = "business.module.performance.settings.fragment.PerfTouchSettingFragment";
-        String[][] targets = new String[][] {
-                {base + "$checkRefreshRateAndTouchResponseVisibility$1", "invokeSuspend"},
-                {base + "$checkRefreshRateAndTouchResponseVisibility$1$1$1", "invokeSuspend"},
-                {base + "$checkRefreshRateAndTouchResponseVisibility$1$2$1", "invokeSuspend"},
-                {base + "$initData$1", "invokeSuspend"},
-                {base + "$initData$1$1$1", "invokeSuspend"},
-                {base + "$onResume$1", "invokeSuspend"},
-                {base + "$onPageSelected$1", "invokeSuspend"}
-        };
-        for (String[] target : targets) {
-            traceApkMethods(loader, target[0], new String[]{target[1]},
-                    "TOUCH COROUTINE");
-        }
-
-        // The APK's initData$1 carries both this$0 (the fragment) and
-        // $multiTypeAdapter. Only mark the adapter when that fragment's
-        // arguments actually identify com.pubg.krmobile.
+        // The coroutine's synthetic fields are null when invokeSuspend is entered,
+        // so inspecting them there is too early. The reliable boundary is the
+        // adapter's own i(List) setter, after eya was constructed by this fragment.
         try {
-            Class<?> outer = loader.loadClass(base + "$initData$1");
-            for (Method method : outer.getDeclaredMethods()) {
-                if (!"invokeSuspend".equals(method.getName())) continue;
-                method.setAccessible(true);
-                hook(method).intercept(new XposedInterface.Hooker() {
+            Class<?> adapterClass = loader.loadClass("eya");
+            int constructors = 0;
+            for (Constructor<?> constructor : adapterClass.getDeclaredConstructors()) {
+                constructor.setAccessible(true);
+                hook(constructor).intercept(new XposedInterface.Hooker() {
                     @Override
                     public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                        Object coroutine = chain.getThisObject();
-                        Object fragment = readFieldValue(coroutine, "this$0");
-                        Object adapter = readFieldValue(coroutine, "$multiTypeAdapter");
-                        if (fragmentHasTargetPackage(fragment)) {
-                            if (adapter != null) {
-                                synchronized (hyperResponseTargetAdapters) {
-                                    hyperResponseTargetAdapters.put(adapter, Boolean.TRUE);
-                                }
-                                log(LOG_INFO, TAG, "HYPER ROW TARGET ADAPTER MARKED: "
-                                        + safeToString(adapter));
+                        StackTraceElement[] frames = Thread.currentThread().getStackTrace();
+                        boolean touchFragment = false;
+                        for (StackTraceElement frame : frames) {
+                            if ("business.module.performance.settings.fragment.PerfTouchSettingFragment".equals(frame.getClassName())
+                                    && "initRecyclerView".equals(frame.getMethodName())) {
+                                touchFragment = true;
+                                break;
                             }
-                        } else {
-                            log(LOG_INFO, TAG, "HYPER ROW INJECTION SKIP: "
-                                    + "initData fragment arguments do not identify " + TARGET_GAME);
                         }
-                        return chain.proceed();
+                        Object result = chain.proceed();
+                        Object instance = chain.getThisObject();
+                        if (touchFragment && instance != null) {
+                            synchronized (hyperResponseTargetAdapters) {
+                                hyperResponseTargetAdapters.put(instance, Boolean.TRUE);
+                            }
+                            log(LOG_INFO, TAG, "HYPER ROW TOUCH ADAPTER TRACKED: " + safeToString(instance));
+                        }
+                        return result;
                     }
                 });
-                log(LOG_INFO, TAG, "HYPER ROW TARGET MARK HOOK INSTALLED: " + method);
+                constructors++;
             }
-        } catch (Throwable t) {
-            log(LOG_ERROR, TAG, "HYPER ROW TARGET MARK HOOK ERROR: " + t);
-        }
+            log(LOG_INFO, TAG, "HYPER ROW ADAPTER CONSTRUCTOR HOOKS = " + constructors);
 
-        // This inner coroutine owns the exact $list passed to the adapter.
-        // Insert the same two model types used by the global list: an sgc
-        // section heading followed by vfc, the existing click/navigation action.
-        try {
-            Class<?> inner = loader.loadClass(base + "$initData$1$1$1");
-            for (Method method : inner.getDeclaredMethods()) {
-                if (!"invokeSuspend".equals(method.getName())) continue;
-                method.setAccessible(true);
-                hook(method).intercept(new XposedInterface.Hooker() {
-                    @Override
-                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                        Object coroutine = chain.getThisObject();
-                        Object adapter = readFieldValue(coroutine, "$multiTypeAdapter");
-                        boolean target;
-                        synchronized (hyperResponseTargetAdapters) {
-                            target = adapter != null
-                                    && Boolean.TRUE.equals(hyperResponseTargetAdapters.get(adapter));
-                        }
-                        if (target) {
-                            Object raw = readFieldValue(coroutine, "$list");
-                            if (raw instanceof List) {
-                                injectHyperResponseModels(loader, coroutine, adapter,
-                                        (List<?>) raw);
-                            }
-                        }
-                        return chain.proceed();
-                    }
-                });
-                log(LOG_INFO, TAG, "HYPER ROW LIST INJECTION HOOK INSTALLED: " + method);
+            Method setter = null;
+            for (Method method : adapterClass.getDeclaredMethods()) {
+                if ("i".equals(method.getName()) && method.getParameterCount() == 1
+                        && List.class.isAssignableFrom(method.getParameterTypes()[0])) {
+                    setter = method;
+                    break;
+                }
             }
+            if (setter == null) {
+                log(LOG_ERROR, TAG, "HYPER ROW ADAPTER LIST SETTER eya.i(List) NOT FOUND");
+                return;
+            }
+            setter.setAccessible(true);
+            hook(setter).intercept(new XposedInterface.Hooker() {
+                @Override
+                public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                    Object adapter = chain.getThisObject();
+                    boolean targetAdapter;
+                    synchronized (hyperResponseTargetAdapters) {
+                        targetAdapter = adapter != null
+                                && Boolean.TRUE.equals(hyperResponseTargetAdapters.get(adapter));
+                    }
+                    Object incoming = chain.getArg(0);
+                    if (targetAdapter && incoming instanceof List) {
+                        log(LOG_INFO, TAG, "HYPER ROW LIST SETTER REACHED: adapter="
+                                + safeToString(adapter) + " list=" + safeToString(incoming));
+                        injectHyperResponseModels(loader, adapter, (List<?>) incoming);
+                    }
+                    return chain.proceed();
+                }
+            });
+            log(LOG_INFO, TAG, "HYPER ROW LIST SETTER HOOK INSTALLED: " + setter);
         } catch (Throwable t) {
-            log(LOG_ERROR, TAG, "HYPER ROW LIST INJECTION HOOK ERROR: " + t);
+            log(LOG_ERROR, TAG, "HYPER ROW DIRECT LIST HOOK ERROR: " + t);
         }
     }
 
@@ -1571,7 +1546,7 @@ public class GyroKrModule extends XposedModule {
     }
 
     @SuppressWarnings("unchecked")
-    private void injectHyperResponseModels(ClassLoader loader, Object coroutine,
+    private void injectHyperResponseModels(ClassLoader loader,
             Object adapter, List<?> originalList) {
         try {
             int sensitivityIndex = -1;
@@ -1604,19 +1579,18 @@ public class GyroKrModule extends XposedModule {
             actionConstructor.setAccessible(true);
             Object action = actionConstructor.newInstance();
 
-            List<Object> targetList;
+            List<Object> targetList = (List<Object>) originalList;
             try {
-                targetList = (List<Object>) originalList;
                 targetList.add(sensitivityIndex, header);
                 targetList.add(sensitivityIndex + 1, action);
             } catch (Throwable immutable) {
-                targetList = new ArrayList<Object>(originalList);
-                targetList.add(sensitivityIndex, header);
-                targetList.add(sensitivityIndex + 1, action);
-                setFieldValue(coroutine, "$list", targetList);
+                log(LOG_ERROR, TAG, "HYPER ROW LIST IS NOT MUTABLE; refusing unsafe adapter-field replacement: "
+                        + immutable);
+                return;
             }
             log(LOG_INFO, TAG, "HYPER ROW INJECTED: index=" + sensitivityIndex
                     + " listSize=" + targetList.size()
+                    + " adapter=" + safeToString(adapter)
                     + " header=" + safeToString(header)
                     + " action=" + safeToString(action));
         } catch (Throwable t) {
