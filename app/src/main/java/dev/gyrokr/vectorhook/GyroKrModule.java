@@ -50,6 +50,7 @@ public class GyroKrModule extends XposedModule {
             // APK 내부 Hyper Response 실제 UI 판정 경로 추적
             installHyperResponseApkTraceHooks(loader);
             installPerfTouchKDumpHook(loader);
+            installWihTraceHooks(loader);
             installPerfTouchModelTraceHook(loader);
             return;
         }
@@ -1406,6 +1407,9 @@ public class GyroKrModule extends XposedModule {
 
                         Object result = chain.proceed();
 
+                        // h is a Kotlin Lazy; after K() it should hold the
+                        // wih instance observed in previous diagnostics.
+                        inspectLazyField("K THIS AFTER h", thiz, "h");
                         dumpFieldsShallow("K THIS AFTER", thiz, 2, 160);
                         if (result != null) {
                             dumpObjectShallow("K RESULT", result, 2, 120);
@@ -1425,6 +1429,147 @@ public class GyroKrModule extends XposedModule {
         }
     }
 
+
+
+    // ================================================================
+    // wih provider inspection and read-only method tracing.
+    // The fragment's Kotlin Lazy field "h" resolves to wih after K().
+    // ================================================================
+
+    private void installWihTraceHooks(ClassLoader loader) {
+        try {
+            Class<?> clazz = loader.loadClass("wih");
+            log(LOG_INFO, TAG, "WIH CLASS FOUND = " + clazz.getName());
+            log(LOG_INFO, TAG, "WIH SUPER = " + clazz.getSuperclass());
+
+            int installed = 0;
+            for (Method method : clazz.getDeclaredMethods()) {
+                if (Modifier.isAbstract(method.getModifiers())
+                        || Modifier.isNative(method.getModifiers())) {
+                    continue;
+                }
+                if (method.getDeclaringClass() == Object.class) continue;
+
+                method.setAccessible(true);
+                hook(method).intercept(new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        Method called = (Method) chain.getExecutable();
+                        StringBuilder args = new StringBuilder();
+                        for (int i = 0; i < called.getParameterCount(); i++) {
+                            if (i > 0) args.append(", ");
+                            args.append("arg").append(i).append("=")
+                                    .append(safeToString(chain.getArg(i)));
+                        }
+
+                        log(LOG_INFO, TAG, "WIH CALL: " + called
+                                + " args=[" + args + "] this="
+                                + safeToString(chain.getThisObject()));
+
+                        Object result = chain.proceed();
+
+                        log(LOG_INFO, TAG, "WIH RESULT: " + called.getName()
+                                + " -> " + safeToString(result));
+
+                        if (result instanceof List) {
+                            List<?> list = (List<?>) result;
+                            log(LOG_INFO, TAG, "WIH LIST RESULT SIZE="
+                                    + list.size() + " value=" + safeToString(list));
+                            for (int i = 0; i < Math.min(list.size(), 20); i++) {
+                                Object item = list.get(i);
+                                log(LOG_INFO, TAG, "WIH LIST ITEM[" + i + "] CLASS="
+                                        + (item == null ? "null" : item.getClass().getName())
+                                        + " VALUE=" + safeToString(item));
+                                if (item != null) {
+                                    dumpObjectShallow("WIH LIST ITEM[" + i + "]",
+                                            item, 2, 40);
+                                }
+                            }
+                        } else if (result != null
+                                && !result.getClass().getName().startsWith("java.")
+                                && !result.getClass().getName().startsWith("android.")) {
+                            dumpObjectShallow("WIH RESULT OBJECT", result, 2, 60);
+                        }
+
+                        return result;
+                    }
+                });
+
+                log(LOG_INFO, TAG, "WIH METHOD HOOK INSTALLED = " + method);
+                installed++;
+            }
+
+            log(LOG_INFO, TAG, "WIH METHOD HOOK COUNT = " + installed);
+
+            for (Field field : clazz.getDeclaredFields()) {
+                log(LOG_INFO, TAG, "WIH FIELD DECL = " + field);
+            }
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG, "WIH TRACE INSTALL ERROR = " + e);
+        }
+    }
+
+    private void inspectLazyField(String label, Object owner, String fieldName) {
+        if (owner == null) {
+            log(LOG_INFO, TAG, label + " OWNER=NULL");
+            return;
+        }
+
+        try {
+            Field target = null;
+            Class<?> c = owner.getClass();
+            while (c != null) {
+                try {
+                    target = c.getDeclaredField(fieldName);
+                    break;
+                } catch (NoSuchFieldException ignored) {
+                    c = c.getSuperclass();
+                }
+            }
+
+            if (target == null) {
+                log(LOG_INFO, TAG, label + " FIELD NOT FOUND");
+                return;
+            }
+
+            target.setAccessible(true);
+            Object lazy = target.get(owner);
+            log(LOG_INFO, TAG, label + " LAZY CLASS="
+                    + (lazy == null ? "null" : lazy.getClass().getName()));
+            dumpObjectShallow(label + " LAZY", lazy, 2, 80);
+
+            if (lazy == null) return;
+
+            Class<?> lazyClass = lazy.getClass();
+            while (lazyClass != null && lazyClass != Object.class) {
+                for (Field f : lazyClass.getDeclaredFields()) {
+                    if (Modifier.isStatic(f.getModifiers())) continue;
+                    try {
+                        f.setAccessible(true);
+                        Object value = f.get(lazy);
+                        log(LOG_INFO, TAG, label + " LAZY FIELD "
+                                + lazyClass.getSimpleName() + "." + f.getName()
+                                + " [" + f.getType().getName() + "] = "
+                                + safeToString(value));
+
+                        if (value != null && "wih".equals(value.getClass().getName())) {
+                            dumpObjectShallow(label + " WIH VALUE", value, 3, 100);
+                            Class<?> wc = value.getClass();
+                            for (Method m : wc.getDeclaredMethods()) {
+                                log(LOG_INFO, TAG, label + " WIH METHOD DECL = " + m);
+                            }
+                        }
+                    } catch (Throwable e) {
+                        log(LOG_INFO, TAG, label + " LAZY FIELD READ ERROR "
+                                + f.getName() + " = " + e);
+                    }
+                }
+                lazyClass = lazyClass.getSuperclass();
+            }
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG, label + " INSPECT ERROR = " + e);
+        }
+    }
 
     // Trace methods on the eya list-builder and its registered touch row/delegate types.
     // Observation only: no arguments, return values, or fields are modified.
