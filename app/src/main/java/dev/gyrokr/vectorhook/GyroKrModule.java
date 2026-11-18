@@ -1,6 +1,7 @@
 package dev.gyrokr.vectorhook;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.List;
@@ -1499,6 +1500,8 @@ public class GyroKrModule extends XposedModule {
                         if (dumpFragment) {
                             dumpFieldsShallow("TOUCH FRAGMENT BEFORE " + name,
                                     fragment, 1, 100);
+                            dumpNamedField("TOUCH FRAGMENT ADAPTER j BEFORE " + name,
+                                    fragment, "j");
                             dumpNamedField("TOUCH FRAGMENT LIST o BEFORE " + name,
                                     fragment, "o");
                         }
@@ -1519,6 +1522,8 @@ public class GyroKrModule extends XposedModule {
                         if (dumpFragment) {
                             dumpFieldsShallow("TOUCH FRAGMENT AFTER " + name,
                                     fragment, 1, 100);
+                            dumpNamedField("TOUCH FRAGMENT ADAPTER j AFTER " + name,
+                                    fragment, "j");
                             dumpNamedField("TOUCH FRAGMENT LIST o AFTER " + name,
                                     fragment, "o");
                         }
@@ -1702,6 +1707,9 @@ public class GyroKrModule extends XposedModule {
     // Trace methods on the eya list-builder and its registered touch row/delegate types.
     // Observation only: no arguments, return values, or fields are modified.
     private void installPerfTouchModelTraceHook(ClassLoader loader) {
+        // eya constructor trace: identify who creates each adapter instance.
+        installEyaConstructorTraceHooks(loader);
+
         String[] names = new String[] {
                 "eya", "mgc", "sgc", "vfc", "bgc", "zfc", "wfc",
                 "business.module.performance.settings.touch.e",
@@ -1759,6 +1767,16 @@ public class GyroKrModule extends XposedModule {
                                     dumpModelObject("MODEL TRACE ARG" + i, arg);
                                 }
                             }
+                            boolean eyaListSetter = "eya".equals(clazz.getName())
+                                    && "i".equals(method.getName())
+                                    && method.getParameterCount() == 1
+                                    && chain.getArg(0) instanceof List;
+                            if (eyaListSetter) {
+                                log(LOG_INFO, TAG, "EYA LIST SETTER STACK BEFORE: "
+                                        + android.util.Log.getStackTraceString(new Throwable()));
+                                dumpNamedField("EYA i(List) FIELD j BEFORE", thiz, "j");
+                                dumpModelList("EYA i(List) INPUT", (List<?>) chain.getArg(0));
+                            }
                             if ("eya".equals(clazz.getName()) && thiz != null) {
                                 dumpNamedField("MODEL TRACE eya.j BEFORE", thiz, "j");
                             }
@@ -1783,6 +1801,10 @@ public class GyroKrModule extends XposedModule {
                             if ("eya".equals(clazz.getName()) && thiz != null) {
                                 dumpNamedField("MODEL TRACE eya.j AFTER", thiz, "j");
                             }
+                            if (eyaListSetter) {
+                                dumpNamedField("EYA i(List) FIELD j AFTER", thiz, "j");
+                                dumpFieldsShallow("EYA i(List) THIS AFTER", thiz, 1, 100);
+                            }
                             if (result instanceof List) {
                                 dumpModelList("MODEL TRACE " + clazz.getName()
                                         + "." + method.getName() + " RESULT", (List<?>) result);
@@ -1800,6 +1822,47 @@ public class GyroKrModule extends XposedModule {
             }
         }
         log(LOG_INFO, TAG, "MODEL TRACE HOOK COUNT = " + total);
+    }
+
+    // Trace every eya constructor to connect adapter identity to its creation path.
+    private void installEyaConstructorTraceHooks(ClassLoader loader) {
+        try {
+            Class<?> clazz = loader.loadClass("eya");
+            int installed = 0;
+            for (Constructor<?> constructor : clazz.getDeclaredConstructors()) {
+                constructor.setAccessible(true);
+                hook(constructor).intercept(new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        StringBuilder args = new StringBuilder();
+                        for (int i = 0; i < constructor.getParameterCount(); i++) {
+                            if (i > 0) args.append(", ");
+                            args.append("arg").append(i).append("=")
+                                    .append(safeToString(chain.getArg(i)));
+                        }
+                        log(LOG_INFO, TAG, "EYA CONSTRUCTOR CALL: " + constructor
+                                + " args=[" + args + "]");
+                        log(LOG_INFO, TAG, "EYA CONSTRUCTOR STACK: "
+                                + android.util.Log.getStackTraceString(new Throwable()));
+
+                        Object result = chain.proceed();
+                        Object instance = chain.getThisObject();
+                        log(LOG_INFO, TAG, "EYA CONSTRUCTOR COMPLETE: " + constructor
+                                + " this=" + safeToString(instance));
+                        if (instance != null) {
+                            dumpFieldsShallow("EYA CONSTRUCTOR INSTANCE", instance, 2, 120);
+                            dumpNamedField("EYA CONSTRUCTOR FIELD j", instance, "j");
+                        }
+                        return result;
+                    }
+                });
+                log(LOG_INFO, TAG, "EYA CONSTRUCTOR HOOK INSTALLED: " + constructor);
+                installed++;
+            }
+            log(LOG_INFO, TAG, "EYA CONSTRUCTOR HOOK COUNT = " + installed);
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG, "EYA CONSTRUCTOR TRACE ERROR: " + e);
+        }
     }
 
     private void dumpNamedField(String label, Object owner, String fieldName) {
