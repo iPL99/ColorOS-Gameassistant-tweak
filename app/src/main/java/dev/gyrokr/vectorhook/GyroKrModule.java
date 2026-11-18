@@ -1494,13 +1494,23 @@ public class GyroKrModule extends XposedModule {
                                 || "I".equals(name) || "L".equals(name) || "M".equals(name)
                                 || "N".equals(name) || "O".equals(name) || "P".equals(name)
                                 || "q".equals(name) || "r".equals(name)
-                                || "s".equals(name) || "x".equals(name));
+                                || "s".equals(name) || "x".equals(name)
+                                || "z".equals(name));
                         if (dumpFragment) {
                             dumpFieldsShallow("TOUCH FRAGMENT BEFORE " + name,
                                     fragment, 1, 100);
                         }
 
-                        Object result = chain.proceed();
+                        Object result;
+                        try {
+                            result = chain.proceed();
+                        } catch (Throwable t) {
+                            log(LOG_ERROR, TAG, "TOUCH FRAGMENT TRACE THROW: " + method
+                                    + " -> " + t.getClass().getName() + ": " + t.getMessage());
+                            log(LOG_ERROR, TAG, "TOUCH FRAGMENT TRACE STACK: "
+                                    + android.util.Log.getStackTraceString(t));
+                            throw t;
+                        }
 
                         log(LOG_INFO, TAG, "TOUCH FRAGMENT TRACE RESULT: " + method
                                 + " -> " + safeToString(result));
