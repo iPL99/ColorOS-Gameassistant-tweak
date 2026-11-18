@@ -4,7 +4,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.List;
-import java.util.ArrayList;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
@@ -46,7 +45,6 @@ public class GyroKrModule extends XposedModule {
             // Hyper Response 엔진 관찰 전용
             installTouchHooks(loader);
             installFeatureListHook(loader);
-            installGameSpaceTouchForceHooks(loader);
             return;
         }
 
@@ -64,7 +62,6 @@ public class GyroKrModule extends XposedModule {
 
             // ExtremeTouch / Hyper Response 실제 진입점 관찰
             installExtremeTouchHooks(loader);
-            installExtremeTouchForceHooks(loader);
         }
     }
 
@@ -465,7 +462,13 @@ public class GyroKrModule extends XposedModule {
             Object result = chain.proceed();
 
             log(LOG_INFO, TAG,
-                    "PERFORMANCE a() RESULT = "
+                    "PERFORMANCE a() RESULT BEFORE FORCE = "
+                            + describePerformanceSetting(result));
+
+            forceTouchRateEnabled(result, "a()");
+
+            log(LOG_INFO, TAG,
+                    "PERFORMANCE a() RESULT AFTER FORCE = "
                             + describePerformanceSetting(result));
 
             return result;
@@ -491,7 +494,13 @@ public class GyroKrModule extends XposedModule {
                                 + packageName);
 
                 log(LOG_INFO, TAG,
-                        "PERFORMANCE d() RESULT = "
+                        "PERFORMANCE d() RESULT BEFORE FORCE = "
+                                + describePerformanceSetting(result));
+
+                forceTouchRateEnabled(result, "d()");
+
+                log(LOG_INFO, TAG,
+                        "PERFORMANCE d() RESULT AFTER FORCE = "
                                 + describePerformanceSetting(result));
             }
 
@@ -972,173 +981,113 @@ public class GyroKrModule extends XposedModule {
     }
 
     // ================================================================
-    // Hyper Response force gate
-    //
-    // Purpose:
-    //   Some OPlus builds gate Extreme Touch/Hyper Response behind a
-    //   per-package boolean support check.  For TARGET_GAME only, make
-    //   matching boolean support/availability checks return true.
-    //
-    // This does not alter PUBG code or anti-cheat code.  It only changes
-    // OPlus GameSpace/COSA feature-gate results for TARGET_GAME.
-    // ================================================================
-
-    private void installGameSpaceTouchForceHooks(ClassLoader loader) {
-        try {
-            Class<?> clazz = loader.loadClass(
-                    "com.oplus.cosa.COSASDKManager"
-            );
-
-            int installed = 0;
-
-            for (Method method : clazz.getDeclaredMethods()) {
-                if (method.getReturnType() != boolean.class) {
-                    continue;
-                }
-
-                boolean hasString = false;
-                for (Class<?> p : method.getParameterTypes()) {
-                    if (p == String.class) {
-                        hasString = true;
-                        break;
-                    }
-                }
-
-                if (!hasString) {
-                    continue;
-                }
-
-                String n = method.getName().toLowerCase();
-                if (!(n.contains("touch")
-                        || n.contains("support")
-                        || n.contains("enable")
-                        || n.contains("available")
-                        || n.contains("allow")
-                        || n.contains("game"))) {
-                    continue;
-                }
-
-                method.setAccessible(true);
-                hook(method).intercept(new TargetBooleanGateHooker(
-                        "GAME_SPACE", method.getName()));
-
-                log(LOG_INFO, TAG,
-                        "HYPER RESPONSE GAME-SPACE GATE HOOK: " + method);
-                installed++;
-            }
-
-            log(LOG_INFO, TAG,
-                    "HYPER RESPONSE GAME-SPACE GATE HOOKS = " + installed);
-
-        } catch (Throwable e) {
-            log(LOG_ERROR, TAG,
-                    "GameSpace Hyper Response gate ERROR: " + e);
-        }
-    }
-
-    private void installExtremeTouchForceHooks(ClassLoader loader) {
-        try {
-            Class<?> clazz = loader.loadClass(
-                    "com.oplus.feature.extremetouch.ExtremeTouchFeature"
-            );
-
-            int installed = 0;
-
-            for (Method method : clazz.getDeclaredMethods()) {
-                if (method.getReturnType() != boolean.class) {
-                    continue;
-                }
-
-                boolean hasString = false;
-                for (Class<?> p : method.getParameterTypes()) {
-                    if (p == String.class) {
-                        hasString = true;
-                        break;
-                    }
-                }
-
-                if (!hasString) {
-                    continue;
-                }
-
-                String n = method.getName().toLowerCase();
-
-                // Avoid changing unrelated boolean methods.
-                if (!(n.contains("support")
-                        || n.contains("enable")
-                        || n.contains("available")
-                        || n.contains("allow")
-                        || n.contains("game")
-                        || n.contains("touch")
-                        || n.contains("extreme")
-                        || n.equals("h"))) {
-                    continue;
-                }
-
-                method.setAccessible(true);
-                hook(method).intercept(new TargetBooleanGateHooker(
-                        "EXTREME_TOUCH", method.getName()));
-
-                log(LOG_INFO, TAG,
-                        "HYPER RESPONSE EXTREME-TOUCH GATE HOOK: " + method);
-                installed++;
-            }
-
-            log(LOG_INFO, TAG,
-                    "HYPER RESPONSE EXTREME-TOUCH GATE HOOKS = " + installed);
-
-        } catch (Throwable e) {
-            log(LOG_ERROR, TAG,
-                    "ExtremeTouch force gate ERROR: " + e);
-        }
-    }
-
-    private class TargetBooleanGateHooker
-            implements XposedInterface.Hooker {
-
-        private final String source;
-        private final String methodName;
-
-        TargetBooleanGateHooker(String source, String methodName) {
-            this.source = source;
-            this.methodName = methodName;
-        }
-
-        @Override
-        public Object intercept(
-                XposedInterface.Chain chain
-        ) throws Throwable {
-
-            boolean targetHit = false;
-
-            for (int i = 0;
-                 i < chain.getExecutable().getParameterCount();
-                 i++) {
-
-                Object arg = chain.getArg(i);
-
-                if (arg instanceof String
-                        && TARGET_GAME.equals(arg)) {
-                    targetHit = true;
-                    break;
-                }
-            }
-
-            if (targetHit) {
-                log(LOG_INFO, TAG,
-                        "HYPER RESPONSE FORCE TRUE: "
-                                + source + "." + methodName
-                                + "(TARGET_GAME)");
-                return Boolean.TRUE;
-            }
-
-            return chain.proceed();
-        }
-    }
-
-    // ================================================================
     // Reflection helper
     // ================================================================
+
+    // ================================================================
+    // Hyper Response touch-rate state force
+    //
+    // Observed runtime structure:
+    // PerformanceSetting$b
+    //   -> field "l"
+    //   -> TouchRateConfigState
+    //      -> isTouchModeTouchRateEnabled
+    //
+    // This only changes the OPlus-side returned configuration object.
+    // It does not hook or alter the PUBG process.
+    // ================================================================
+
+    private void forceTouchRateEnabled(
+            Object performanceSetting,
+            String source
+    ) {
+        if (performanceSetting == null) {
+            log(LOG_INFO, TAG,
+                    "TOUCH RATE FORCE: " + source
+                            + " result=null");
+            return;
+        }
+
+        try {
+            Field stateField =
+                    findField(performanceSetting.getClass(), "l");
+
+            if (stateField == null) {
+                log(LOG_ERROR, TAG,
+                        "TOUCH RATE FORCE: " + source
+                                + " field l NOT FOUND");
+                return;
+            }
+
+            stateField.setAccessible(true);
+
+            Object state = stateField.get(performanceSetting);
+
+            if (state == null) {
+                log(LOG_ERROR, TAG,
+                        "TOUCH RATE FORCE: " + source
+                                + " field l=null");
+                return;
+            }
+
+            Field enabledField =
+                    findField(
+                            state.getClass(),
+                            "isTouchModeTouchRateEnabled"
+                    );
+
+            if (enabledField == null) {
+                log(LOG_ERROR, TAG,
+                        "TOUCH RATE FORCE: " + source
+                                + " isTouchModeTouchRateEnabled NOT FOUND"
+                );
+                return;
+            }
+
+            enabledField.setAccessible(true);
+
+            Object before = enabledField.get(state);
+
+            if (enabledField.getType() == boolean.class
+                    || enabledField.getType() == Boolean.class) {
+                enabledField.set(state, Boolean.TRUE);
+
+                log(LOG_INFO, TAG,
+                        "TOUCH RATE FORCE: " + source
+                                + " isTouchModeTouchRateEnabled "
+                                + before + " -> true");
+            } else {
+                log(LOG_ERROR, TAG,
+                        "TOUCH RATE FORCE: " + source
+                                + " unexpected field type="
+                                + enabledField.getType().getName());
+            }
+
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG,
+                    "TOUCH RATE FORCE ERROR: " + source
+                            + " : " + e);
+        }
+    }
+
+    private Field findField(
+            Class<?> clazz,
+            String name
+    ) {
+        Class<?> current = clazz;
+
+        while (current != null) {
+            try {
+                return current.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+                current = current.getSuperclass();
+            } catch (Throwable e) {
+                return null;
+            }
+        }
+
+        return null;
+    }
 
     private String describePerformanceSetting(
             Object object
