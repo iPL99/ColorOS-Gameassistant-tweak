@@ -462,14 +462,12 @@ public class GyroKrModule extends XposedModule {
             Object result = chain.proceed();
 
             log(LOG_INFO, TAG,
-                    "PERFORMANCE a() RESULT BEFORE FORCE = "
+                    "PERFORMANCE a() RESULT = "
                             + describePerformanceSetting(result));
 
-            forceTouchRateEnabled(result, "a()");
-
-            log(LOG_INFO, TAG,
-                    "PERFORMANCE a() RESULT AFTER FORCE = "
-                            + describePerformanceSetting(result));
+            // TEMP: dump the real Java fields of TouchRateConfigState.
+            // toString() labels are not necessarily Java field names.
+            dumpTouchRateStateFields(result);
 
             return result;
         }
@@ -494,13 +492,7 @@ public class GyroKrModule extends XposedModule {
                                 + packageName);
 
                 log(LOG_INFO, TAG,
-                        "PERFORMANCE d() RESULT BEFORE FORCE = "
-                                + describePerformanceSetting(result));
-
-                forceTouchRateEnabled(result, "d()");
-
-                log(LOG_INFO, TAG,
-                        "PERFORMANCE d() RESULT AFTER FORCE = "
+                        "PERFORMANCE d() RESULT = "
                                 + describePerformanceSetting(result));
             }
 
@@ -984,109 +976,72 @@ public class GyroKrModule extends XposedModule {
     // Reflection helper
     // ================================================================
 
-    // ================================================================
-    // Hyper Response touch-rate state force
-    //
-    // Observed runtime structure:
-    // PerformanceSetting$b
-    //   -> field "l"
-    //   -> TouchRateConfigState
-    //      -> isTouchModeTouchRateEnabled
-    //
-    // This only changes the OPlus-side returned configuration object.
-    // It does not hook or alter the PUBG process.
-    // ================================================================
-
-    private void forceTouchRateEnabled(
-            Object performanceSetting,
-            String source
-    ) {
+    private void dumpTouchRateStateFields(Object performanceSetting) {
         if (performanceSetting == null) {
-            log(LOG_INFO, TAG,
-                    "TOUCH RATE FORCE: " + source
-                            + " result=null");
+            log(LOG_INFO, TAG, "TOUCH STATE FIELD: performanceSetting=null");
             return;
         }
 
         try {
-            Field stateField =
-                    findField(performanceSetting.getClass(), "l");
+            Field stateField = null;
+            Class<?> owner = performanceSetting.getClass();
+
+            // Current build appears to expose the nested state as field "l".
+            // Walk superclasses too, in case the field is inherited.
+            while (owner != null && stateField == null) {
+                try {
+                    stateField = owner.getDeclaredField("l");
+                } catch (NoSuchFieldException ignored) {
+                    owner = owner.getSuperclass();
+                }
+            }
 
             if (stateField == null) {
-                log(LOG_ERROR, TAG,
-                        "TOUCH RATE FORCE: " + source
-                                + " field l NOT FOUND");
+                log(LOG_INFO, TAG,
+                        "TOUCH STATE FIELD: field l NOT FOUND in "
+                                + performanceSetting.getClass().getName());
                 return;
             }
 
             stateField.setAccessible(true);
-
             Object state = stateField.get(performanceSetting);
 
             if (state == null) {
-                log(LOG_ERROR, TAG,
-                        "TOUCH RATE FORCE: " + source
-                                + " field l=null");
+                log(LOG_INFO, TAG, "TOUCH STATE FIELD: state=null");
                 return;
             }
 
-            Field enabledField =
-                    findField(
-                            state.getClass(),
-                            "isTouchModeTouchRateEnabled"
-                    );
+            Class<?> clazz = state.getClass();
 
-            if (enabledField == null) {
-                log(LOG_ERROR, TAG,
-                        "TOUCH RATE FORCE: " + source
-                                + " isTouchModeTouchRateEnabled NOT FOUND"
-                );
-                return;
-            }
+            while (clazz != null) {
+                for (Field field : clazz.getDeclaredFields()) {
+                    try {
+                        field.setAccessible(true);
+                        Object value = field.get(state);
 
-            enabledField.setAccessible(true);
+                        log(LOG_INFO, TAG,
+                                "TOUCH STATE FIELD: name="
+                                        + field.getName()
+                                        + " type="
+                                        + field.getType().getName()
+                                        + " value="
+                                        + String.valueOf(value));
+                    } catch (Throwable e) {
+                        log(LOG_INFO, TAG,
+                                "TOUCH STATE FIELD: name="
+                                        + field.getName()
+                                        + " <ERROR> "
+                                        + e);
+                    }
+                }
 
-            Object before = enabledField.get(state);
-
-            if (enabledField.getType() == boolean.class
-                    || enabledField.getType() == Boolean.class) {
-                enabledField.set(state, Boolean.TRUE);
-
-                log(LOG_INFO, TAG,
-                        "TOUCH RATE FORCE: " + source
-                                + " isTouchModeTouchRateEnabled "
-                                + before + " -> true");
-            } else {
-                log(LOG_ERROR, TAG,
-                        "TOUCH RATE FORCE: " + source
-                                + " unexpected field type="
-                                + enabledField.getType().getName());
+                clazz = clazz.getSuperclass();
             }
 
         } catch (Throwable e) {
             log(LOG_ERROR, TAG,
-                    "TOUCH RATE FORCE ERROR: " + source
-                            + " : " + e);
+                    "TOUCH STATE FIELD DUMP ERROR: " + e);
         }
-    }
-
-    private Field findField(
-            Class<?> clazz,
-            String name
-    ) {
-        Class<?> current = clazz;
-
-        while (current != null) {
-            try {
-                return current.getDeclaredField(name);
-            } catch (NoSuchFieldException ignored) {
-                current = current.getSuperclass();
-            } catch (Throwable e) {
-                return null;
-            }
-        }
-
-        return null;
     }
 
     private String describePerformanceSetting(
