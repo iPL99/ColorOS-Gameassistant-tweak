@@ -5,6 +5,9 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
@@ -19,6 +22,9 @@ public class GyroKrModule extends XposedModule {
 
     private static final int LOG_INFO = 4;
     private static final int LOG_ERROR = 6;
+
+    // Adapter identities belonging to a fragment whose arguments identify PUBG KR.
+    private final Map<Object, Boolean> hyperResponseTargetAdapters = new WeakHashMap<>();
 
     public GyroKrModule() {
         super();
@@ -52,6 +58,7 @@ public class GyroKrModule extends XposedModule {
             installHyperResponseApkTraceHooks(loader);
             installPerfTouchKDumpHook(loader);
             installPerfTouchFragmentCallTrace(loader);
+            installPerfTouchCoroutineTraceHooks(loader);
             installWihTraceHooks(loader);
             installPerfTouchModelTraceHook(loader);
             return;
@@ -1339,7 +1346,9 @@ public class GyroKrModule extends XposedModule {
                 loader,
                 "business.module.performance.settings.fragment.PerfTouchSettingFragment",
                 new String[]{
+                        "D",
                         "E",
+                        "F",
                         "I",
                         "N",
                         "initRecyclerView",
@@ -1375,6 +1384,277 @@ public class GyroKrModule extends XposedModule {
                 },
                 "TOUCH RESPONSE FRAGMENT"
         );
+    }
+
+    // ================================================================
+    // Trace the asynchronous list-building and visibility-check coroutines.
+    // APK classes.dex confirms these exact generated coroutine class names.
+    // This is read-only; it does not fabricate rows or bypass device gates.
+    // ================================================================
+
+    private void installPerfTouchCoroutineTraceHooks(ClassLoader loader) {
+        String base = "business.module.performance.settings.fragment.PerfTouchSettingFragment";
+        String[][] targets = new String[][] {
+                {base + "$checkRefreshRateAndTouchResponseVisibility$1", "invokeSuspend"},
+                {base + "$checkRefreshRateAndTouchResponseVisibility$1$1$1", "invokeSuspend"},
+                {base + "$checkRefreshRateAndTouchResponseVisibility$1$2$1", "invokeSuspend"},
+                {base + "$initData$1", "invokeSuspend"},
+                {base + "$initData$1$1$1", "invokeSuspend"},
+                {base + "$onResume$1", "invokeSuspend"},
+                {base + "$onPageSelected$1", "invokeSuspend"}
+        };
+        for (String[] target : targets) {
+            traceApkMethods(loader, target[0], new String[]{target[1]},
+                    "TOUCH COROUTINE");
+        }
+
+        // The APK's initData$1 carries both this$0 (the fragment) and
+        // $multiTypeAdapter. Only mark the adapter when that fragment's
+        // arguments actually identify com.pubg.krmobile.
+        try {
+            Class<?> outer = loader.loadClass(base + "$initData$1");
+            for (Method method : outer.getDeclaredMethods()) {
+                if (!"invokeSuspend".equals(method.getName())) continue;
+                method.setAccessible(true);
+                hook(method).intercept(new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        Object coroutine = chain.getThisObject();
+                        Object fragment = readFieldValue(coroutine, "this$0");
+                        Object adapter = readFieldValue(coroutine, "$multiTypeAdapter");
+                        if (fragmentHasTargetPackage(fragment)) {
+                            if (adapter != null) {
+                                synchronized (hyperResponseTargetAdapters) {
+                                    hyperResponseTargetAdapters.put(adapter, Boolean.TRUE);
+                                }
+                                log(LOG_INFO, TAG, "HYPER ROW TARGET ADAPTER MARKED: "
+                                        + safeToString(adapter));
+                            }
+                        } else {
+                            log(LOG_INFO, TAG, "HYPER ROW INJECTION SKIP: "
+                                    + "initData fragment arguments do not identify " + TARGET_GAME);
+                        }
+                        return chain.proceed();
+                    }
+                });
+                log(LOG_INFO, TAG, "HYPER ROW TARGET MARK HOOK INSTALLED: " + method);
+            }
+        } catch (Throwable t) {
+            log(LOG_ERROR, TAG, "HYPER ROW TARGET MARK HOOK ERROR: " + t);
+        }
+
+        // This inner coroutine owns the exact $list passed to the adapter.
+        // Insert the same two model types used by the global list: an sgc
+        // section heading followed by vfc, the existing click/navigation action.
+        try {
+            Class<?> inner = loader.loadClass(base + "$initData$1$1$1");
+            for (Method method : inner.getDeclaredMethods()) {
+                if (!"invokeSuspend".equals(method.getName())) continue;
+                method.setAccessible(true);
+                hook(method).intercept(new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        Object coroutine = chain.getThisObject();
+                        Object adapter = readFieldValue(coroutine, "$multiTypeAdapter");
+                        boolean target;
+                        synchronized (hyperResponseTargetAdapters) {
+                            target = adapter != null
+                                    && Boolean.TRUE.equals(hyperResponseTargetAdapters.get(adapter));
+                        }
+                        if (target) {
+                            Object raw = readFieldValue(coroutine, "$list");
+                            if (raw instanceof List) {
+                                injectHyperResponseModels(loader, coroutine, adapter,
+                                        (List<?>) raw);
+                            }
+                        }
+                        return chain.proceed();
+                    }
+                });
+                log(LOG_INFO, TAG, "HYPER ROW LIST INJECTION HOOK INSTALLED: " + method);
+            }
+        } catch (Throwable t) {
+            log(LOG_ERROR, TAG, "HYPER ROW LIST INJECTION HOOK ERROR: " + t);
+        }
+    }
+
+    private Object readFieldValue(Object owner, String fieldName) {
+        if (owner == null) return null;
+        Class<?> type = owner.getClass();
+        while (type != null) {
+            try {
+                Field field = type.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                return field.get(owner);
+            } catch (NoSuchFieldException ignored) {
+                type = type.getSuperclass();
+            } catch (Throwable t) {
+                log(LOG_ERROR, TAG, "FIELD READ ERROR " + fieldName + ": " + t);
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private boolean fragmentHasTargetPackage(Object fragment) {
+        if (fragment == null) return false;
+        try {
+            Method getArguments = fragment.getClass().getMethod("getArguments");
+            Object bundle = getArguments.invoke(fragment);
+            if (bundle != null) {
+                Method keySet = bundle.getClass().getMethod("keySet");
+                Method get = bundle.getClass().getMethod("get", String.class);
+                Object keys = keySet.invoke(bundle);
+                if (keys instanceof Iterable) {
+                    for (Object key : (Iterable<?>) keys) {
+                        Object value = get.invoke(bundle, String.valueOf(key));
+                        if (TARGET_GAME.equals(value)) {
+                            log(LOG_INFO, TAG, "HYPER ROW TARGET PACKAGE FOUND in arguments key=" + key);
+                            return true;
+                        }
+                    }
+                }
+            }
+            // The selected game may be passed through the hosting Activity intent.
+            try {
+                Method getActivity = fragment.getClass().getMethod("getActivity");
+                Object activity = getActivity.invoke(fragment);
+                if (activity != null) {
+                    Method getIntent = activity.getClass().getMethod("getIntent");
+                    Object intent = getIntent.invoke(activity);
+                    if (intent != null) {
+                        Method getExtras = intent.getClass().getMethod("getExtras");
+                        Object extras = getExtras.invoke(intent);
+                        if (bundleHasTargetPackage(extras)) {
+                            log(LOG_INFO, TAG, "HYPER ROW TARGET PACKAGE FOUND in Activity intent");
+                            return true;
+                        }
+                    }
+                }
+            } catch (Throwable ignored) { }
+        } catch (Throwable t) {
+            log(LOG_INFO, TAG, "HYPER ROW ARGUMENT CHECK: " + t.getClass().getSimpleName());
+        }
+        // Some Game Space builds keep the selected package on the fragment or
+        // its base class rather than in Fragment arguments. Check direct fields only.
+        Class<?> type = fragment.getClass();
+        while (type != null) {
+            for (Field field : type.getDeclaredFields()) {
+                try {
+                    field.setAccessible(true);
+                    Object value = field.get(fragment);
+                    if (TARGET_GAME.equals(value)) {
+                        log(LOG_INFO, TAG, "HYPER ROW TARGET PACKAGE FOUND in field=" + field.getName());
+                        return true;
+                    }
+                } catch (Throwable ignored) { }
+            }
+            type = type.getSuperclass();
+        }
+        return false;
+    }
+
+    private boolean bundleHasTargetPackage(Object bundle) {
+        if (bundle == null) return false;
+        try {
+            Method keySet = bundle.getClass().getMethod("keySet");
+            Method get = bundle.getClass().getMethod("get", String.class);
+            Object keys = keySet.invoke(bundle);
+            if (keys instanceof Iterable) {
+                for (Object key : (Iterable<?>) keys) {
+                    Object value = get.invoke(bundle, String.valueOf(key));
+                    if (TARGET_GAME.equals(value)) return true;
+                }
+            }
+        } catch (Throwable ignored) { }
+        return false;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void injectHyperResponseModels(ClassLoader loader, Object coroutine,
+            Object adapter, List<?> originalList) {
+        try {
+            int sensitivityIndex = -1;
+            Object sensitivityHeader = null;
+            for (int i = 0; i < originalList.size(); i++) {
+                Object item = originalList.get(i);
+                if (item == null) continue;
+                if ("vfc".equals(item.getClass().getName())) {
+                    log(LOG_INFO, TAG, "HYPER ROW ALREADY PRESENT");
+                    return;
+                }
+                if ("sgc".equals(item.getClass().getName())) {
+                    Object title = readFieldValue(item, "f");
+                    if (title != null && title.toString().contains("감도")) {
+                        sensitivityIndex = i;
+                        sensitivityHeader = item;
+                    }
+                }
+            }
+            if (sensitivityIndex < 0 || sensitivityHeader == null) {
+                log(LOG_INFO, TAG, "HYPER ROW INJECTION SKIP: sensitivity header not found; list="
+                        + safeToString(originalList));
+                return;
+            }
+
+            Object header = cloneSectionHeader(loader, sensitivityHeader,
+                    "하이퍼 리스폰스 엔진");
+            Class<?> actionClass = loader.loadClass("vfc");
+            Constructor<?> actionConstructor = actionClass.getDeclaredConstructor();
+            actionConstructor.setAccessible(true);
+            Object action = actionConstructor.newInstance();
+
+            List<Object> targetList;
+            try {
+                targetList = (List<Object>) originalList;
+                targetList.add(sensitivityIndex, header);
+                targetList.add(sensitivityIndex + 1, action);
+            } catch (Throwable immutable) {
+                targetList = new ArrayList<Object>(originalList);
+                targetList.add(sensitivityIndex, header);
+                targetList.add(sensitivityIndex + 1, action);
+                setFieldValue(coroutine, "$list", targetList);
+            }
+            log(LOG_INFO, TAG, "HYPER ROW INJECTED: index=" + sensitivityIndex
+                    + " listSize=" + targetList.size()
+                    + " header=" + safeToString(header)
+                    + " action=" + safeToString(action));
+        } catch (Throwable t) {
+            log(LOG_ERROR, TAG, "HYPER ROW INJECTION FAILED: " + t);
+        }
+    }
+
+    private Object cloneSectionHeader(ClassLoader loader, Object source, String title)
+            throws Throwable {
+        Class<?> type = loader.loadClass("sgc");
+        int id = ((Number) readFieldValue(source, "e")).intValue();
+        boolean flag = Boolean.TRUE.equals(readFieldValue(source, "g"));
+        Object listener = readFieldValue(source, "h");
+        for (Constructor<?> constructor : type.getDeclaredConstructors()) {
+            Class<?>[] p = constructor.getParameterTypes();
+            if (p.length == 4 && p[0] == int.class
+                    && CharSequence.class.isAssignableFrom(p[1])
+                    && p[2] == boolean.class) {
+                constructor.setAccessible(true);
+                return constructor.newInstance(id, title, flag, listener);
+            }
+        }
+        throw new NoSuchMethodException("sgc(int, CharSequence, boolean, listener)");
+    }
+
+    private void setFieldValue(Object owner, String name, Object value) throws Throwable {
+        Class<?> type = owner.getClass();
+        while (type != null) {
+            try {
+                Field field = type.getDeclaredField(name);
+                field.setAccessible(true);
+                field.set(owner, value);
+                return;
+            } catch (NoSuchFieldException ignored) {
+                type = type.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(name);
     }
 
     // ================================================================
@@ -1842,8 +2122,14 @@ public class GyroKrModule extends XposedModule {
                         }
                         log(LOG_INFO, TAG, "EYA CONSTRUCTOR CALL: " + constructor
                                 + " args=[" + args + "]");
-                        log(LOG_INFO, TAG, "EYA CONSTRUCTOR STACK: "
-                                + android.util.Log.getStackTraceString(new Throwable()));
+                        StackTraceElement[] frames = Thread.currentThread().getStackTrace();
+                        StringBuilder stack = new StringBuilder();
+                        for (int frame = 0; frame < Math.min(frames.length, 18); frame++) {
+                            if (frame > 0) stack.append(" <- ");
+                            stack.append(frames[frame].getClassName()).append(".")
+                                    .append(frames[frame].getMethodName());
+                        }
+                        log(LOG_INFO, TAG, "EYA CONSTRUCTOR STACK: " + stack);
 
                         Object result = chain.proceed();
                         Object instance = chain.getThisObject();
@@ -2154,6 +2440,15 @@ public class GyroKrModule extends XposedModule {
                             + "." + method.getName() + "(" + args + ")");
 
             boolean inspectRow = "TOUCH RESPONSE ROW".equals(traceLabel);
+            boolean inspectCoroutine = "TOUCH COROUTINE".equals(traceLabel);
+            if (inspectCoroutine) {
+                dumpFieldsShallow("TOUCH COROUTINE THIS BEFORE", thiz, 2, 100);
+                dumpObjectShallow("TOUCH COROUTINE THIS DETAILS BEFORE", thiz, 2, 100);
+                for (int i = 0; i < method.getParameterCount(); i++) {
+                    Object arg = chain.getArg(i);
+                    dumpObjectShallow("TOUCH COROUTINE ARG" + i + " BEFORE", arg, 2, 60);
+                }
+            }
             if (inspectRow) {
                 dumpViewHolderState("ROW BEFORE " + method.getName(), thiz);
                 for (int i = 0; i < method.getParameterCount(); i++) {
@@ -2172,6 +2467,10 @@ public class GyroKrModule extends XposedModule {
                             + " = " + String.valueOf(result));
             if (inspectRow) {
                 dumpViewHolderState("ROW AFTER " + method.getName(), thiz);
+            }
+            if (inspectCoroutine) {
+                dumpFieldsShallow("TOUCH COROUTINE THIS AFTER", thiz, 2, 120);
+                dumpObjectShallow("TOUCH COROUTINE THIS DETAILS AFTER", thiz, 2, 120);
             }
 
             return result;
