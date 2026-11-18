@@ -1499,6 +1499,8 @@ public class GyroKrModule extends XposedModule {
                         if (dumpFragment) {
                             dumpFieldsShallow("TOUCH FRAGMENT BEFORE " + name,
                                     fragment, 1, 100);
+                            dumpNamedField("TOUCH FRAGMENT LIST o BEFORE " + name,
+                                    fragment, "o");
                         }
 
                         Object result;
@@ -1517,6 +1519,8 @@ public class GyroKrModule extends XposedModule {
                         if (dumpFragment) {
                             dumpFieldsShallow("TOUCH FRAGMENT AFTER " + name,
                                     fragment, 1, 100);
+                            dumpNamedField("TOUCH FRAGMENT LIST o AFTER " + name,
+                                    fragment, "o");
                         }
                         if (result instanceof List) {
                             List<?> list = (List<?>) result;
@@ -1743,6 +1747,21 @@ public class GyroKrModule extends XposedModule {
                             }
                             log(LOG_INFO, TAG, "MODEL TRACE CALL: " + method
                                     + " args=[" + args + "] this=" + safeToString(thiz));
+
+                            // Capture every incoming list/model, not only mgc.
+                            // eya.i(List) is the adapter's list replacement path.
+                            for (int i = 0; i < method.getParameterCount(); i++) {
+                                Object arg = chain.getArg(i);
+                                if (arg instanceof List) {
+                                    dumpModelList("MODEL TRACE " + clazz.getName()
+                                            + "." + method.getName() + " ARG" + i, (List<?>) arg);
+                                } else if (arg != null && isTouchModelClass(arg)) {
+                                    dumpModelObject("MODEL TRACE ARG" + i, arg);
+                                }
+                            }
+                            if ("eya".equals(clazz.getName()) && thiz != null) {
+                                dumpNamedField("MODEL TRACE eya.j BEFORE", thiz, "j");
+                            }
                             if ("mgc".equals(clazz.getName())) {
                                 dumpObjectShallow("MG C BEFORE THIS", thiz, 3, 100);
                                 for (int i = 0; i < method.getParameterCount(); i++) {
@@ -1762,11 +1781,13 @@ public class GyroKrModule extends XposedModule {
                                 }
                             }
                             if ("eya".equals(clazz.getName()) && thiz != null) {
-                                dumpNamedField("MODEL TRACE eya.j", thiz, "j");
+                                dumpNamedField("MODEL TRACE eya.j AFTER", thiz, "j");
                             }
                             if (result instanceof List) {
-                                log(LOG_INFO, TAG, "MODEL TRACE LIST SIZE = "
-                                        + ((List<?>) result).size() + " value=" + safeToString(result));
+                                dumpModelList("MODEL TRACE " + clazz.getName()
+                                        + "." + method.getName() + " RESULT", (List<?>) result);
+                            } else if (result != null && isTouchModelClass(result)) {
+                                dumpModelObject("MODEL TRACE RESULT OBJECT", result);
                             }
                             return result;
                         }
@@ -1798,8 +1819,8 @@ public class GyroKrModule extends XposedModule {
                         log(LOG_INFO, TAG, label + "[" + i + "] CLASS="
                                 + (item == null ? "null" : item.getClass().getName())
                                 + " VALUE=" + safeToString(item));
-                        if (item != null && "mgc".equals(item.getClass().getName())) {
-                            dumpObjectShallow(label + "[" + i + "] MG C DETAILS", item, 3, 100);
+                        if (item != null) {
+                            dumpModelObject(label + "[" + i + "] DETAILS", item);
                         }
                     }
                 }
@@ -1812,6 +1833,40 @@ public class GyroKrModule extends XposedModule {
             }
         }
         log(LOG_INFO, TAG, label + " FIELD NOT FOUND");
+    }
+
+    private boolean isTouchModelClass(Object value) {
+        if (value == null) return false;
+        String name = value.getClass().getName();
+        return "mgc".equals(name) || "sgc".equals(name) || "bgc".equals(name)
+                || "fgc".equals(name) || "vfc".equals(name) || "zfc".equals(name)
+                || "wfc".equals(name)
+                || name.startsWith("business.module.performance.settings.touch.");
+    }
+
+    private void dumpModelList(String label, List<?> list) {
+        if (list == null) {
+            log(LOG_INFO, TAG, label + " = null");
+            return;
+        }
+        log(LOG_INFO, TAG, label + " SIZE=" + list.size()
+                + " CLASS=" + list.getClass().getName());
+        int limit = Math.min(list.size(), 30);
+        for (int i = 0; i < limit; i++) {
+            Object item = list.get(i);
+            log(LOG_INFO, TAG, label + "[" + i + "] CLASS="
+                    + (item == null ? "null" : item.getClass().getName())
+                    + " VALUE=" + safeToString(item));
+            if (item != null) dumpModelObject(label + "[" + i + "]", item);
+        }
+    }
+
+    private void dumpModelObject(String label, Object item) {
+        if (item == null) {
+            log(LOG_INFO, TAG, label + " = null");
+            return;
+        }
+        dumpObjectShallow(label, item, 2, 80);
     }
 
     private void dumpObjectShallow(String label, Object obj, int depth, int maxFields) {
