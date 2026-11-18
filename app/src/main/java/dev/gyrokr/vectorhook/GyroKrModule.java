@@ -52,6 +52,9 @@ public class GyroKrModule extends XposedModule {
         if (COSA.equals(packageName)) {
             log(LOG_INFO, TAG, "COSA detected");
 
+            // COSA setPerformanceValue(mode, resolution, touch) 호출 관찰
+            installCosaPerformanceValueHook(loader);
+
             // Hyper Response 설정 흐름 관찰 전용
             installPerformanceSettingHooks(loader);
             installCosaNetworkParserHook(loader);
@@ -261,6 +264,52 @@ public class GyroKrModule extends XposedModule {
             }
 
             return result;
+        }
+    }
+
+    // ================================================================
+    // COSA setPerformanceValue(III) tracing
+    // ================================================================
+
+    private void installCosaPerformanceValueHook(ClassLoader loader) {
+        try {
+            Class<?> clazz = loader.loadClass(
+                    "com.oplus.cosa.COSASDKManager"
+            );
+
+            Method target = clazz.getDeclaredMethod(
+                    "setPerformanceValue",
+                    int.class,
+                    int.class,
+                    int.class
+            );
+            target.setAccessible(true);
+
+            hook(target).intercept(new CosaPerformanceValueHooker());
+
+            log(LOG_INFO, TAG,
+                    "COSA setPerformanceValue HOOK INSTALLED: " + target);
+
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG,
+                    "COSA setPerformanceValue hook ERROR: " + e);
+        }
+    }
+
+    private class CosaPerformanceValueHooker implements XposedInterface.Hooker {
+        @Override
+        public Object intercept(XposedInterface.Chain chain) throws Throwable {
+            Object mode = chain.getArg(0);
+            Object resolution = chain.getArg(1);
+            Object touch = chain.getArg(2);
+
+            log(LOG_INFO, TAG,
+                    "COSA setPerformanceValue CALL"
+                            + " mode=" + mode
+                            + " resolution=" + resolution
+                            + " touch=" + touch);
+
+            return chain.proceed();
         }
     }
 
