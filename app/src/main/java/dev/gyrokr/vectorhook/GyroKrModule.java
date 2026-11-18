@@ -1630,6 +1630,77 @@ public class GyroKrModule extends XposedModule {
         }
     }
 
+
+    // Read-only inspection of RecyclerView ViewHolder.itemView and its descendants.
+    // Reflection is used so the hook code does not depend on app-private view classes.
+    private void dumpViewHolderState(String label, Object holder) {
+        if (holder == null) {
+            log(LOG_INFO, TAG, label + " HOLDER=null");
+            return;
+        }
+        log(LOG_INFO, TAG, label + " HOLDER=" + holder.getClass().getName()
+                + " value=" + safeToString(holder));
+        Object itemView = null;
+        Class<?> c = holder.getClass();
+        while (c != null && itemView == null) {
+            try {
+                Field f = c.getDeclaredField("itemView");
+                f.setAccessible(true);
+                itemView = f.get(holder);
+            } catch (NoSuchFieldException ignored) {
+                c = c.getSuperclass();
+            } catch (Throwable e) {
+                log(LOG_INFO, TAG, label + " ITEMVIEW READ ERROR=" + e);
+                break;
+            }
+        }
+        if (itemView == null) {
+            log(LOG_INFO, TAG, label + " ITEMVIEW=null/not-found");
+            dumpObjectShallow(label + " HOLDER FIELDS", holder, 2, 100);
+            return;
+        }
+        dumpViewTree(label + " ITEMVIEW", itemView, 0, 5);
+    }
+
+    private void dumpViewTree(String label, Object view, int depth, int maxDepth) {
+        if (view == null) return;
+        try {
+            Class<?> cls = view.getClass();
+            StringBuilder line = new StringBuilder(label)
+                    .append(" depth=").append(depth)
+                    .append(" class=").append(cls.getName());
+            String[] methods = new String[]{"getId", "getVisibility", "getAlpha", "getWidth",
+                    "getHeight", "getMeasuredWidth", "getMeasuredHeight", "getTranslationY",
+                    "getText", "isShown", "isEnabled"};
+            for (String name : methods) {
+                try {
+                    Method m = cls.getMethod(name);
+                    Object value = m.invoke(view);
+                    line.append(" ").append(name).append("=").append(safeToString(value));
+                } catch (NoSuchMethodException ignored) {
+                } catch (Throwable e) {
+                    line.append(" ").append(name).append("=<").append(e.getClass().getSimpleName()).append(");");
+                }
+            }
+            log(LOG_INFO, TAG, line.toString());
+            if (depth >= maxDepth) return;
+            try {
+                Method countMethod = cls.getMethod("getChildCount");
+                Method childMethod = cls.getMethod("getChildAt", int.class);
+                int count = ((Number) countMethod.invoke(view)).intValue();
+                log(LOG_INFO, TAG, label + " CHILD_COUNT=" + count);
+                for (int i = 0; i < Math.min(count, 30); i++) {
+                    Object child = childMethod.invoke(view, i);
+                    dumpViewTree(label + "/" + i, child, depth + 1, maxDepth);
+                }
+            } catch (NoSuchMethodException ignored) {
+                // Leaf view.
+            }
+        } catch (Throwable e) {
+            log(LOG_INFO, TAG, label + " VIEW DUMP ERROR=" + e);
+        }
+    }
+
     private void traceApkMethods(
             ClassLoader loader,
             String className,
@@ -1690,15 +1761,31 @@ public class GyroKrModule extends XposedModule {
                         .append(String.valueOf(chain.getArg(i)));
             }
 
+            Object thiz = chain.getThisObject();
             log(LOG_INFO, TAG,
                     traceLabel + " CALL: " + method.getDeclaringClass().getName()
                             + "." + method.getName() + "(" + args + ")");
+
+            boolean inspectRow = "TOUCH RESPONSE ROW".equals(traceLabel);
+            if (inspectRow) {
+                dumpViewHolderState("ROW BEFORE " + method.getName(), thiz);
+                for (int i = 0; i < method.getParameterCount(); i++) {
+                    Object arg = chain.getArg(i);
+                    if (arg != null) {
+                        dumpObjectShallow("ROW ARG" + i + " " + method.getName(), arg, 2, 60);
+                        dumpViewTree("ROW ARG" + i + " VIEW " + method.getName(), arg, 0, 3);
+                    }
+                }
+            }
 
             Object result = chain.proceed();
 
             log(LOG_INFO, TAG,
                     traceLabel + " RESULT: " + method.getName()
                             + " = " + String.valueOf(result));
+            if (inspectRow) {
+                dumpViewHolderState("ROW AFTER " + method.getName(), thiz);
+            }
 
             return result;
         }
