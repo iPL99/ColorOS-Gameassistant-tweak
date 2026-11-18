@@ -943,6 +943,8 @@ public class GyroKrModule extends XposedModule {
                     new StringBuilder();
 
             boolean targetHit = false;
+            String gameStartPackage = null;
+            Boolean gameStartFlagC = null;
 
             for (int i = 0;
                  i < method.getParameterCount();
@@ -963,6 +965,27 @@ public class GyroKrModule extends XposedModule {
                         && TARGET_GAME.equals(arg)) {
                     targetHit = true;
                 }
+
+                if ("gameStart".equals(methodName)
+                        && i == 0
+                        && arg != null) {
+                    gameStartPackage =
+                            readFieldString(arg, "a");
+                    gameStartFlagC =
+                            readFieldBoolean(arg, "c");
+
+                    if (TARGET_GAME.equals(gameStartPackage)) {
+                        targetHit = true;
+                    }
+
+                    log(LOG_INFO, TAG,
+                            "GAMESTART TARGET PACKAGE = "
+                                    + gameStartPackage);
+
+                    log(LOG_INFO, TAG,
+                            "GAMESTART TARGET FLAG c = "
+                                    + gameStartFlagC);
+                }
             }
 
             log(LOG_INFO, TAG,
@@ -970,6 +993,14 @@ public class GyroKrModule extends XposedModule {
                             + methodName
                             + "(" + args + ")"
                             + " targetHit=" + targetHit);
+
+            if ("gameStart".equals(methodName)
+                    && targetHit) {
+                log(LOG_INFO, TAG,
+                        "GAMESTART TARGET HIT: "
+                                + TARGET_GAME
+                                + " -> r6.q.a");
+            }
 
             Object result = chain.proceed();
 
@@ -979,12 +1010,78 @@ public class GyroKrModule extends XposedModule {
                             + " = "
                             + String.valueOf(result));
 
-            if ("gameStart".equals(methodName) && args != null) {
+            if ("gameStart".equals(methodName)) {
                 dumpExtremeTouchArgument(chain.getArg(0));
+
+                if (targetHit) {
+                    log(LOG_INFO, TAG,
+                            "GAMESTART TARGET PATH COMPLETED: "
+                                    + TARGET_GAME);
+                }
             }
 
             return result;
         }
+    }
+
+    private String readFieldString(Object object, String fieldName) {
+        if (object == null) {
+            return null;
+        }
+
+        try {
+            Class<?> owner = object.getClass();
+
+            while (owner != null && owner != Object.class) {
+                try {
+                    Field field = owner.getDeclaredField(fieldName);
+                    field.setAccessible(true);
+                    Object value = field.get(object);
+                    return value == null ? null : String.valueOf(value);
+                } catch (NoSuchFieldException ignored) {
+                    owner = owner.getSuperclass();
+                }
+            }
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG,
+                    "GAMESTART FIELD READ ERROR: "
+                            + fieldName + " = " + e);
+        }
+
+        return null;
+    }
+
+    private Boolean readFieldBoolean(Object object, String fieldName) {
+        if (object == null) {
+            return null;
+        }
+
+        try {
+            Class<?> owner = object.getClass();
+
+            while (owner != null && owner != Object.class) {
+                try {
+                    Field field = owner.getDeclaredField(fieldName);
+                    field.setAccessible(true);
+
+                    if (field.getType() != boolean.class
+                            && field.getType() != Boolean.class) {
+                        return null;
+                    }
+
+                    Object value = field.get(object);
+                    return value == null ? null : (Boolean) value;
+                } catch (NoSuchFieldException ignored) {
+                    owner = owner.getSuperclass();
+                }
+            }
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG,
+                    "GAMESTART FIELD READ ERROR: "
+                            + fieldName + " = " + e);
+        }
+
+        return null;
     }
 
     // ================================================================
