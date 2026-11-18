@@ -50,6 +50,7 @@ public class GyroKrModule extends XposedModule {
             // APK 내부 Hyper Response 실제 UI 판정 경로 추적
             installHyperResponseApkTraceHooks(loader);
             installPerfTouchKDumpHook(loader);
+            installPerfTouchModelTraceHook(loader);
             return;
         }
 
@@ -1422,6 +1423,95 @@ public class GyroKrModule extends XposedModule {
         } catch (Throwable e) {
             log(LOG_ERROR, TAG, "K DUMP HOOK ERROR: " + e);
         }
+    }
+
+
+    // Trace methods on the eya list-builder and its registered touch row/delegate types.
+    // Observation only: no arguments, return values, or fields are modified.
+    private void installPerfTouchModelTraceHook(ClassLoader loader) {
+        String[] names = new String[] {
+                "eya", "sgc", "vfc", "bgc", "zfc", "wfc",
+                "business.module.performance.settings.touch.e",
+                "business.module.performance.settings.touch.g"
+        };
+        int total = 0;
+        for (String name : names) {
+            try {
+                Class<?> clazz = loader.loadClass(name);
+                log(LOG_INFO, TAG, "MODEL TRACE CLASS FOUND: " + name);
+                for (Method method : clazz.getDeclaredMethods()) {
+                    if (Modifier.isAbstract(method.getModifiers())
+                            || Modifier.isNative(method.getModifiers())) continue;
+                    // Keep the trace focused on list/model-building methods.
+                    String mn = method.getName().toLowerCase();
+                    if (!(name.equals("eya") || mn.contains("touch")
+                            || mn.contains("response") || mn.contains("perf")
+                            || mn.contains("type") || mn.contains("item")
+                            || mn.contains("list") || mn.equals("a")
+                            || mn.equals("b") || mn.equals("c"))) continue;
+                    method.setAccessible(true);
+                    hook(method).intercept(new XposedInterface.Hooker() {
+                        @Override
+                        public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                            Object thiz = chain.getThisObject();
+                            StringBuilder args = new StringBuilder();
+                            for (int i = 0; i < method.getParameterCount(); i++) {
+                                if (i > 0) args.append(", ");
+                                args.append(safeToString(chain.getArg(i)));
+                            }
+                            log(LOG_INFO, TAG, "MODEL TRACE CALL: " + method
+                                    + " args=[" + args + "] this=" + safeToString(thiz));
+                            Object result = chain.proceed();
+                            log(LOG_INFO, TAG, "MODEL TRACE RESULT: " + method
+                                    + " -> " + safeToString(result));
+                            if ("eya".equals(clazz.getName()) && thiz != null) {
+                                dumpNamedField("MODEL TRACE eya.j", thiz, "j");
+                            }
+                            if (result instanceof List) {
+                                log(LOG_INFO, TAG, "MODEL TRACE LIST SIZE = "
+                                        + ((List<?>) result).size() + " value=" + safeToString(result));
+                            }
+                            return result;
+                        }
+                    });
+                    log(LOG_INFO, TAG, "MODEL TRACE HOOK INSTALLED: " + method);
+                    total++;
+                }
+            } catch (Throwable e) {
+                log(LOG_INFO, TAG, "MODEL TRACE CLASS MISS: " + name + " : " + e);
+            }
+        }
+        log(LOG_INFO, TAG, "MODEL TRACE HOOK COUNT = " + total);
+    }
+
+    private void dumpNamedField(String label, Object owner, String fieldName) {
+        if (owner == null) return;
+        Class<?> c = owner.getClass();
+        while (c != null) {
+            try {
+                Field f = c.getDeclaredField(fieldName);
+                f.setAccessible(true);
+                Object value = f.get(owner);
+                log(LOG_INFO, TAG, label + " = " + safeToString(value));
+                if (value instanceof List) {
+                    List<?> list = (List<?>) value;
+                    log(LOG_INFO, TAG, label + " SIZE = " + list.size());
+                    for (int i = 0; i < Math.min(list.size(), 20); i++) {
+                        Object item = list.get(i);
+                        log(LOG_INFO, TAG, label + "[" + i + "] CLASS="
+                                + (item == null ? "null" : item.getClass().getName())
+                                + " VALUE=" + safeToString(item));
+                    }
+                }
+                return;
+            } catch (NoSuchFieldException ignored) {
+                c = c.getSuperclass();
+            } catch (Throwable e) {
+                log(LOG_INFO, TAG, label + " READ ERROR: " + e);
+                return;
+            }
+        }
+        log(LOG_INFO, TAG, label + " FIELD NOT FOUND");
     }
 
     private void dumpObjectShallow(String label, Object obj, int depth, int maxFields) {
