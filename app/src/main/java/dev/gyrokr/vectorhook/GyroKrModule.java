@@ -62,6 +62,9 @@ public class GyroKrModule extends XposedModule {
 
             // ExtremeTouch / Hyper Response 실제 진입점 관찰
             installExtremeTouchHooks(loader);
+
+            // PUBG KR에서 ExtremeTouch 지원 판정만 테스트
+            installExtremeTouchForceHook(loader);
         }
     }
 
@@ -462,18 +465,7 @@ public class GyroKrModule extends XposedModule {
             Object result = chain.proceed();
 
             log(LOG_INFO, TAG,
-                    "PERFORMANCE a() RESULT BEFORE FORCE = "
-                            + describePerformanceSetting(result));
-
-            if (forceTouchRateForTarget(result)) {
-                log(LOG_INFO, TAG,
-                        "TOUCH FORCE APPLIED: "
-                                + TARGET_GAME
-                                + " -> l.a=true");
-            }
-
-            log(LOG_INFO, TAG,
-                    "PERFORMANCE a() RESULT AFTER FORCE = "
+                    "PERFORMANCE a() RESULT = "
                             + describePerformanceSetting(result));
 
             return result;
@@ -499,80 +491,11 @@ public class GyroKrModule extends XposedModule {
                                 + packageName);
 
                 log(LOG_INFO, TAG,
-                        "PERFORMANCE d() RESULT BEFORE FORCE = "
-                                + describePerformanceSetting(result));
-
-                if (forceTouchRateForTarget(result)) {
-                    log(LOG_INFO, TAG,
-                            "TOUCH FORCE APPLIED: "
-                                    + TARGET_GAME
-                                    + " -> l.a=true");
-                }
-
-                log(LOG_INFO, TAG,
-                        "PERFORMANCE d() RESULT AFTER FORCE = "
+                        "PERFORMANCE d() RESULT = "
                                 + describePerformanceSetting(result));
             }
 
             return result;
-        }
-    }
-
-    // ================================================================
-    // TouchRateConfigState force
-    //
-    // PerformanceSetting$b.l points to the nested TouchRateConfigState
-    // object. In the current build its field "a" corresponds to
-    // isTouchModeTouchRateEnabled.
-    // ================================================================
-
-    private boolean forceTouchRateForTarget(Object result) {
-        if (result == null) {
-            return false;
-        }
-
-        try {
-            Field nestedField = result.getClass().getDeclaredField("l");
-            nestedField.setAccessible(true);
-
-            Object nested = nestedField.get(result);
-
-            if (nested == null) {
-                log(LOG_INFO, TAG,
-                        "TOUCH FORCE SKIP: result.l == null");
-                return false;
-            }
-
-            Field enabledField =
-                    nested.getClass().getDeclaredField("a");
-            enabledField.setAccessible(true);
-
-            Object before = enabledField.get(nested);
-
-            log(LOG_INFO, TAG,
-                    "TOUCH FORCE BEFORE: l.a=" + before
-                            + " nestedClass="
-                            + nested.getClass().getName());
-
-            if (enabledField.getType() != boolean.class) {
-                log(LOG_ERROR, TAG,
-                        "TOUCH FORCE ERROR: l.a is not boolean");
-                return false;
-            }
-
-            enabledField.setBoolean(nested, true);
-
-            Object after = enabledField.get(nested);
-
-            log(LOG_INFO, TAG,
-                    "TOUCH FORCE AFTER: l.a=" + after);
-
-            return Boolean.TRUE.equals(after);
-
-        } catch (Throwable e) {
-            log(LOG_ERROR, TAG,
-                    "TOUCH FORCE ERROR: " + e);
-            return false;
         }
     }
 
@@ -1045,6 +968,86 @@ public class GyroKrModule extends XposedModule {
                             + String.valueOf(result));
 
             return result;
+        }
+    }
+
+    // ================================================================
+    // ExtremeTouch h(String) force test
+    //
+    // Test only:
+    // - Only com.pubg.krmobile is affected.
+    // - Only h(String):boolean is forced to true.
+    // - gameStart and all other methods remain untouched.
+    // ================================================================
+
+    private void installExtremeTouchForceHook(
+            ClassLoader loader
+    ) {
+        try {
+            Class<?> clazz = loader.loadClass(
+                    "com.oplus.feature.extremetouch.ExtremeTouchFeature"
+            );
+
+            Method target = null;
+
+            for (Method method : clazz.getDeclaredMethods()) {
+                if ("h".equals(method.getName())
+                        && method.getParameterCount() == 1
+                        && method.getParameterTypes()[0] == String.class
+                        && method.getReturnType() == boolean.class) {
+
+                    target = method;
+                    break;
+                }
+            }
+
+            if (target == null) {
+                log(LOG_ERROR, TAG,
+                        "EXTREME TOUCH FORCE: h(String):boolean NOT FOUND");
+                return;
+            }
+
+            target.setAccessible(true);
+
+            hook(target).intercept(
+                    new ExtremeTouchForceHooker()
+            );
+
+            log(LOG_INFO, TAG,
+                    "EXTREME TOUCH FORCE HOOK INSTALLED: " + target);
+
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG,
+                    "ExtremeTouch force hook ERROR: " + e);
+        }
+    }
+
+    private class ExtremeTouchForceHooker
+            implements XposedInterface.Hooker {
+
+        @Override
+        public Object intercept(
+                XposedInterface.Chain chain
+        ) throws Throwable {
+
+            Object arg = chain.getArg(0);
+            String packageName = String.valueOf(arg);
+
+            if (!TARGET_GAME.equals(packageName)) {
+                return chain.proceed();
+            }
+
+            Object original = chain.proceed();
+
+            log(LOG_INFO, TAG,
+                    "EXTREME TOUCH FORCE BEFORE: h("
+                            + packageName + ") original=" + original);
+
+            log(LOG_INFO, TAG,
+                    "EXTREME TOUCH FORCE AFTER: h("
+                            + packageName + ") forced=true");
+
+            return Boolean.TRUE;
         }
     }
 
