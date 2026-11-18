@@ -4,6 +4,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.List;
+import java.util.ArrayList;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
@@ -45,6 +46,7 @@ public class GyroKrModule extends XposedModule {
             // Hyper Response 엔진 관찰 전용
             installTouchHooks(loader);
             installFeatureListHook(loader);
+            installGameSpaceTouchForceHooks(loader);
             return;
         }
 
@@ -62,6 +64,7 @@ public class GyroKrModule extends XposedModule {
 
             // ExtremeTouch / Hyper Response 실제 진입점 관찰
             installExtremeTouchHooks(loader);
+            installExtremeTouchForceHooks(loader);
         }
     }
 
@@ -965,6 +968,171 @@ public class GyroKrModule extends XposedModule {
                             + String.valueOf(result));
 
             return result;
+        }
+    }
+
+    // ================================================================
+    // Hyper Response force gate
+    //
+    // Purpose:
+    //   Some OPlus builds gate Extreme Touch/Hyper Response behind a
+    //   per-package boolean support check.  For TARGET_GAME only, make
+    //   matching boolean support/availability checks return true.
+    //
+    // This does not alter PUBG code or anti-cheat code.  It only changes
+    // OPlus GameSpace/COSA feature-gate results for TARGET_GAME.
+    // ================================================================
+
+    private void installGameSpaceTouchForceHooks(ClassLoader loader) {
+        try {
+            Class<?> clazz = loader.loadClass(
+                    "com.oplus.cosa.COSASDKManager"
+            );
+
+            int installed = 0;
+
+            for (Method method : clazz.getDeclaredMethods()) {
+                if (method.getReturnType() != boolean.class) {
+                    continue;
+                }
+
+                boolean hasString = false;
+                for (Class<?> p : method.getParameterTypes()) {
+                    if (p == String.class) {
+                        hasString = true;
+                        break;
+                    }
+                }
+
+                if (!hasString) {
+                    continue;
+                }
+
+                String n = method.getName().toLowerCase();
+                if (!(n.contains("touch")
+                        || n.contains("support")
+                        || n.contains("enable")
+                        || n.contains("available")
+                        || n.contains("allow")
+                        || n.contains("game"))) {
+                    continue;
+                }
+
+                method.setAccessible(true);
+                hook(method).intercept(new TargetBooleanGateHooker(
+                        "GAME_SPACE", method.getName()));
+
+                log(LOG_INFO, TAG,
+                        "HYPER RESPONSE GAME-SPACE GATE HOOK: " + method);
+                installed++;
+            }
+
+            log(LOG_INFO, TAG,
+                    "HYPER RESPONSE GAME-SPACE GATE HOOKS = " + installed);
+
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG,
+                    "GameSpace Hyper Response gate ERROR: " + e);
+        }
+    }
+
+    private void installExtremeTouchForceHooks(ClassLoader loader) {
+        try {
+            Class<?> clazz = loader.loadClass(
+                    "com.oplus.feature.extremetouch.ExtremeTouchFeature"
+            );
+
+            int installed = 0;
+
+            for (Method method : clazz.getDeclaredMethods()) {
+                if (method.getReturnType() != boolean.class) {
+                    continue;
+                }
+
+                boolean hasString = false;
+                for (Class<?> p : method.getParameterTypes()) {
+                    if (p == String.class) {
+                        hasString = true;
+                        break;
+                    }
+                }
+
+                if (!hasString) {
+                    continue;
+                }
+
+                String n = method.getName().toLowerCase();
+
+                // Avoid changing unrelated boolean methods.
+                if (!(n.contains("support")
+                        || n.contains("enable")
+                        || n.contains("available")
+                        || n.contains("allow")
+                        || n.contains("game")
+                        || n.contains("touch")
+                        || n.contains("extreme")
+                        || n.equals("h"))) {
+                    continue;
+                }
+
+                method.setAccessible(true);
+                hook(method).intercept(new TargetBooleanGateHooker(
+                        "EXTREME_TOUCH", method.getName()));
+
+                log(LOG_INFO, TAG,
+                        "HYPER RESPONSE EXTREME-TOUCH GATE HOOK: " + method);
+                installed++;
+            }
+
+            log(LOG_INFO, TAG,
+                    "HYPER RESPONSE EXTREME-TOUCH GATE HOOKS = " + installed);
+
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG,
+                    "ExtremeTouch force gate ERROR: " + e);
+        }
+    }
+
+    private class TargetBooleanGateHooker
+            implements XposedInterface.Hooker {
+
+        private final String source;
+        private final String methodName;
+
+        TargetBooleanGateHooker(String source, String methodName) {
+            this.source = source;
+            this.methodName = methodName;
+        }
+
+        @Override
+        public Object intercept(
+                XposedInterface.Chain chain
+        ) throws Throwable {
+
+            boolean targetHit = false;
+
+            for (int i = 0;
+                 i < chain.getExecutable().getParameterCount();
+                 i++) {
+
+                Object arg = chain.getArg(i);
+
+                if (arg instanceof String
+                        && TARGET_GAME.equals(arg)) {
+                    targetHit = true;
+                    break;
+                }
+            }
+
+            if (targetHit) {
+                log(LOG_INFO, TAG,
+                        "HYPER RESPONSE FORCE TRUE: "
+                                + source + "." + methodName
+                                + "(TARGET_GAME)");
+                return Boolean.TRUE;
+            }
+
+            return chain.proceed();
         }
     }
 
