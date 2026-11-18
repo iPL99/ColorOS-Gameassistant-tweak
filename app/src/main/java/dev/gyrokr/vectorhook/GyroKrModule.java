@@ -268,54 +268,60 @@ public class GyroKrModule extends XposedModule {
     }
 
     // ================================================================
-    // COSA setPerformanceValue(III) tracing
-    // ================================================================
+// COSAExportedImpl.setPerformanceValue(III)Z tracing
+// ================================================================
 
-    private void installCosaPerformanceValueHook(ClassLoader loader) {
-        try {
-            Class<?> clazz = loader.loadClass(
-                    "com.oplus.cosa.COSASDKManager"
-            );
+private void installCosaPerformanceValueHook(ClassLoader loader) {
+    try {
+        Class<?> clazz = loader.loadClass(
+                "com.oplus.cosa.exported.COSAExportedImpl"
+        );
 
-            Method target = clazz.getDeclaredMethod(
-                    "setPerformanceValue",
-                    int.class,
-                    int.class,
-                    int.class
-            );
-            target.setAccessible(true);
+        log(LOG_INFO, TAG, "COSAExportedImpl FOUND");
 
-            hook(target).intercept(new CosaPerformanceValueHooker());
+        Method target = clazz.getDeclaredMethod(
+                "setPerformanceValue",
+                int.class,
+                int.class,
+                int.class
+        );
 
-            log(LOG_INFO, TAG,
-                    "COSA setPerformanceValue HOOK INSTALLED: " + target);
+        target.setAccessible(true);
 
-        } catch (Throwable e) {
-            log(LOG_ERROR, TAG,
-                    "COSA setPerformanceValue hook ERROR: " + e);
-        }
+        hook(target).intercept(new CosaPerformanceValueHooker());
+
+        log(LOG_INFO, TAG,
+                "COSA setPerformanceValue HOOK INSTALLED: " + target);
+
+    } catch (Throwable e) {
+        log(LOG_ERROR, TAG,
+                "COSA setPerformanceValue hook ERROR: " + e);
     }
+}
 
-    private class CosaPerformanceValueHooker implements XposedInterface.Hooker {
-        @Override
-        public Object intercept(XposedInterface.Chain chain) throws Throwable {
-            Object mode = chain.getArg(0);
-            Object resolution = chain.getArg(1);
-            Object touch = chain.getArg(2);
+private class CosaPerformanceValueHooker implements XposedInterface.Hooker {
 
-            log(LOG_INFO, TAG,
-                    "COSA setPerformanceValue CALL"
-                            + " mode=" + mode
-                            + " resolution=" + resolution
-                            + " touch=" + touch);
+    @Override
+    public Object intercept(XposedInterface.Chain chain) throws Throwable {
 
-            return chain.proceed();
-        }
+        Object mode = chain.getArg(0);
+        Object resolution = chain.getArg(1);
+        Object touch = chain.getArg(2);
+
+        log(LOG_INFO, TAG,
+                "COSA setPerformanceValue CALL"
+                        + " mode=" + mode
+                        + " resolution=" + resolution
+                        + " touch=" + touch);
+
+        Object result = chain.proceed();
+
+        log(LOG_INFO, TAG,
+                "COSA setPerformanceValue RESULT=" + result);
+
+        return result;
     }
-
-    // ================================================================
-    // COSA PerformanceSetting tracing only
-    // ================================================================
+}
 
     private void installPerformanceSettingHooks(ClassLoader loader) {
         try {
