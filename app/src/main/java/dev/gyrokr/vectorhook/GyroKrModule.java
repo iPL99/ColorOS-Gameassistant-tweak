@@ -53,7 +53,7 @@ public class GyroKrModule extends XposedModule {
             installHyperResponseApkTraceHooks(loader);
             installPerfTouchKDumpHook(loader);
             installPerfTouchFragmentCallTrace(loader);
-            installHyperResponseListSetterHook(loader);
+            installHyperResponseEyaHooks(loader);
             installWihTraceHooks(loader);
             installPerfTouchModelTraceHook(loader);
             return;
@@ -1370,108 +1370,113 @@ public class GyroKrModule extends XposedModule {
     }
 
     // ================================================================
-    // Inject the Hyper Response UI row through the exact adapter list setter
-    // verified in games_10445.apk. This does not force device support gates.
+    // Hyper Response UI injection.
+    // The runtime logs/APK path identify eya as the actual adapter used by
+    // PerfTouchSettingFragment.K(...).  Do not depend on coroutine fields:
+    // those fields are null before invokeSuspend reaches its body.
     // ================================================================
 
-    private void installHyperResponseListSetterHook(ClassLoader loader) {
-        // Verified from games_10445.apk:
-        // PerfTouchSettingFragment.K(uva) receives the RecyclerView adapter,
-        // and the initData coroutine updates it through uva.i(List).
-        // Hook the actual list setter directly instead of relying on a second
-        // hook of K(), which is already observed by the diagnostic hook above.
-        installHyperResponseListSetterHooks(loader);
-    }
-
-    private void installHyperResponseListSetterHooks(ClassLoader loader) {
+    private void installHyperResponseEyaHooks(ClassLoader loader) {
         try {
-            Class<?> adapterClass = loader.loadClass("uva");
-            Class<?> listClass = List.class;
-            Method setter = adapterClass.getDeclaredMethod("i", listClass);
-
-            if (setter.getReturnType() != void.class) {
-                throw new NoSuchMethodException("uva.i(List) does not return void: " + setter);
-            }
-
-            setter.setAccessible(true);
-            hook(setter).intercept(new XposedInterface.Hooker() {
-                @Override
-                public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                    Object adapter = chain.getThisObject();
-                    Object incoming = chain.getArg(0);
-                    List<Object> replacement = null;
-
-                    if (adapterClass.isInstance(adapter) && incoming instanceof List) {
-                        List<?> source = (List<?>) incoming;
-                        if (containsHyperResponseAnchor(source)) {
-                            replacement = new ArrayList<Object>(source);
-                            if (!injectHyperResponseModels(loader, adapter, replacement)) {
-                                replacement = null;
+            Class<?> fragment = loader.loadClass(
+                    "business.module.performance.settings.fragment.PerfTouchSettingFragment");
+            int kCount = 0;
+            for (Method method : fragment.getDeclaredMethods()) {
+                if (!"K".equals(method.getName())) continue;
+                Class<?>[] p = method.getParameterTypes();
+                if (p.length != 1 || !"eya".equals(p[0].getName())) continue;
+                method.setAccessible(true);
+                hook(method).intercept(new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        Object adapter = chain.getArg(0);
+                        Object result = chain.proceed();
+                        if (adapter != null) {
+                            synchronized (hyperResponseTargetAdapters) {
+                                hyperResponseTargetAdapters.put(adapter, Boolean.TRUE);
                             }
-                        }
-                    }
-
-                    Object result = chain.proceed();
-
-                    if (replacement != null) {
-                        if (replaceAdapterListReference(adapter, incoming, replacement)) {
-                            notifyAdapterDataChanged(adapter);
                             log(LOG_INFO, TAG,
-                                    "HYPER ROW INJECTED INTO uva.j: size="
-                                            + replacement.size()
-                                            + " adapter=" + safeToString(adapter));
-                        } else {
-                            log(LOG_ERROR, TAG,
-                                    "HYPER ROW LIST REPLACEMENT FAILED: adapter="
-                                            + safeToString(adapter));
+                                    "HYPER ROW EYA TARGET TRACKED: " + safeToString(adapter));
                         }
+                        return result;
                     }
-                    return result;
-                }
-            });
-
-            log(LOG_INFO, TAG, "HYPER ROW EXACT LIST SETTER HOOK INSTALLED: " + setter);
-        } catch (Throwable t) {
-            log(LOG_ERROR, TAG, "HYPER ROW EXACT LIST SETTER HOOK ERROR: " + t);
-        }
-    }
-
-    private boolean containsHyperResponseAnchor(List<?> list) {
-        if (list == null) return false;
-        for (Object item : list) {
-            if (item == null) continue;
-            if (!"sgc".equals(item.getClass().getName())) continue;
-            Object value = readFieldValue(item, "f");
-            String title = value == null ? "" : value.toString().toLowerCase();
-            if (title.contains("감도") || title.contains("sensitivity")
-                    || title.contains("하이퍼 리스폰스 엔진")
-                    || title.contains("hyper response engine")) {
-                return true;
+                });
+                log(LOG_INFO, TAG, "HYPER ROW K HOOK INSTALLED: " + method);
+                kCount++;
             }
+            log(LOG_INFO, TAG, "HYPER ROW K HOOK COUNT = " + kCount);
+        } catch (Throwable t) {
+            log(LOG_ERROR, TAG, "HYPER ROW K HOOK ERROR: " + t);
         }
-        return false;
-    }
 
-    private boolean replaceAdapterListReference(Object adapter, Object original,
-            List<Object> replacement) {
-        if (adapter == null || replacement == null) return false;
-
-        // The uploaded APK defines uva.j as the List field, and uva.i(List)
-        // assigns its argument directly to that field.
         try {
-            Field field = adapter.getClass().getDeclaredField("j");
-            if (List.class.isAssignableFrom(field.getType())) {
-                field.setAccessible(true);
-                field.set(adapter, replacement);
-                return true;
-            }
-        } catch (NoSuchFieldException ignored) {
-            // Fall through to a field-identity lookup for compatible app revisions.
-        } catch (Throwable t) {
-            log(LOG_ERROR, TAG, "HYPER ROW uva.j REPLACE ERROR: " + t);
-        }
+            Class<?> adapterClass = loader.loadClass("eya");
+            int iCount = 0;
+            for (Method method : adapterClass.getDeclaredMethods()) {
+                if (!"i".equals(method.getName())) continue;
+                Class<?>[] p = method.getParameterTypes();
+                if (p.length != 1 || !List.class.isAssignableFrom(p[0])) continue;
+                method.setAccessible(true);
+                hook(method).intercept(new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        Object adapter = chain.getThisObject();
+                        boolean target;
+                        synchronized (hyperResponseTargetAdapters) {
+                            target = Boolean.TRUE.equals(
+                                    hyperResponseTargetAdapters.get(adapter));
+                        }
 
-        Class<?> type = adapter.getClass();
+                        if (!target) return chain.proceed();
+
+                        Object incoming = chain.getArg(0);
+                        if (!(incoming instanceof List)) return chain.proceed();
+
+                        List<?> source = (List<?>) incoming;
+                        ArrayList<Object> replacement = new ArrayList<Object>(source);
+                        if (!injectHyperResponseModels(loader, adapter, replacement)) {
+                            return chain.proceed();
+                        }
+
+                        // The observed uva hypothesis was wrong. For eya, the
+                        // reliable path is to mutate the actual incoming mutable
+                        // list before the original i(List) executes. If it is
+                        // immutable, fall back to replacing the adapter's list
+                        // field after the original call.
+                        boolean mutated = false;
+                        try {
+                            @SuppressWarnings("unchecked")
+                            List<Object> mutable = (List<Object>) incoming;
+                            mutable.clear();
+                            mutable.addAll(replacement);
+                            mutated = true;
+                        } catch (Throwable ignored) { }
+
+                        Object result = chain.proceed();
+
+                        if (!mutated) {
+                            replaceAdapterListFieldByContents(adapter, incoming, replacement);
+                        }
+                        notifyAdapterDataChanged(adapter);
+                        log(LOG_INFO, TAG,
+                                "HYPER ROW INJECTED INTO eya.i: size="
+                                        + replacement.size() + " adapter="
+                                        + safeToString(adapter));
+                        return result;
+                    }
+                });
+                log(LOG_INFO, TAG, "HYPER ROW EYA i(List) HOOK INSTALLED: " + method);
+                iCount++;
+            }
+            log(LOG_INFO, TAG, "HYPER ROW EYA i(List) HOOK COUNT = " + iCount);
+        } catch (Throwable t) {
+            log(LOG_ERROR, TAG, "HYPER ROW EYA i(List) HOOK ERROR: " + t);
+        }
+    }
+
+    private boolean replaceAdapterListFieldByContents(Object adapter,
+            Object original, List<Object> replacement) {
+        Class<?> type = adapter == null ? null : adapter.getClass();
         while (type != null) {
             for (Field field : type.getDeclaredFields()) {
                 if (!List.class.isAssignableFrom(field.getType())) continue;
@@ -1488,17 +1493,6 @@ public class GyroKrModule extends XposedModule {
             type = type.getSuperclass();
         }
         return false;
-    }
-
-    private void notifyAdapterDataChanged(Object adapter) {
-        if (adapter == null) return;
-        try {
-            Method notify = adapter.getClass().getMethod("notifyDataSetChanged");
-            notify.setAccessible(true);
-            notify.invoke(adapter);
-        } catch (Throwable t) {
-            log(LOG_ERROR, TAG, "HYPER ROW notifyDataSetChanged ERROR: " + t);
-        }
     }
 
     private Object readFieldValue(Object owner, String fieldName) {
