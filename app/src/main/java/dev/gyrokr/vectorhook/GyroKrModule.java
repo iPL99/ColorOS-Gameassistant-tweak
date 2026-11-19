@@ -3,7 +3,11 @@ package dev.gyrokr.vectorhook;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
@@ -13,7 +17,15 @@ public class GyroKrModule extends XposedModule {
 
     private static final String TAG = "OplusGyroKR";
     private static final String GAME_SPACE = "com.oplus.games";
-    private static final String TARGET_GAME = "com.pubg.krmobile";
+
+    // 자이로 / 하이퍼 리스폰스를 강제로 활성화할 게임 패키지 목록.
+    // 다른 게임/지역판을 추가하려면 여기에 패키지명만 한 줄 추가하면 된다.
+    private static final Set<String> TARGET_GAMES = new LinkedHashSet<>(Arrays.asList(
+            "com.pubg.krmobile",   // 배틀그라운드 모바일 (한국)
+            "com.tencent.ig",      // PUBG MOBILE (글로벌)
+            "com.rekoo.pubgm",     // PUBG MOBILE (대만)
+            "com.vng.pubgmobile"   // PUBG MOBILE (베트남)
+    ));
 
     // Hyper Response Engine (ADFR) support list
     private static final String PEER_GAME = "com.pubg.imobile"; // BGMI: 엔티티 값 복제용
@@ -126,7 +138,7 @@ public class GyroKrModule extends XposedModule {
 
             String packageName = String.valueOf(arg);
 
-            if (TARGET_GAME.equals(packageName)) {
+            if (TARGET_GAMES.contains(packageName)) {
                 log(LOG_INFO, TAG,
                         "GYRO TARGET HIT: " + methodName
                                 + "(" + packageName + ") -> true");
@@ -226,20 +238,29 @@ public class GyroKrModule extends XposedModule {
 
                 List<?> source = (List<?>) result;
                 Object peer = null;
+                Set<String> existing = new HashSet<>();
 
                 for (Object item : source) {
                     if (item == null) {
                         continue;
                     }
                     String pkg = (String) getPkgName.invoke(item);
+                    existing.add(pkg);
 
-                    if (TARGET_GAME.equals(pkg)) {
-                        // 이미 목록에 있으면 그대로 사용
-                        return result;
-                    }
                     if (PEER_GAME.equals(pkg)) {
                         peer = item;
                     }
+                }
+
+                // 목록에 아직 없는 대상 게임만 추가
+                List<String> missing = new ArrayList<>();
+                for (String target : TARGET_GAMES) {
+                    if (!existing.contains(target)) {
+                        missing.add(target);
+                    }
+                }
+                if (missing.isEmpty()) {
+                    return result;
                 }
 
                 // BGMI 엔티티가 있으면 값을 복제, 없으면 기본 JSON 값(0, -1) 사용
@@ -250,17 +271,17 @@ public class GyroKrModule extends XposedModule {
                     brightness = (Integer) getBrightness.invoke(peer);
                 }
 
-                Object injected = ctor.newInstance(
-                        TARGET_GAME, state, brightness);
-
-                List<Object> merged = new ArrayList<>(source.size() + 1);
+                List<Object> merged =
+                        new ArrayList<>(source.size() + missing.size());
                 merged.addAll(source);
-                merged.add(injected);
+                for (String target : missing) {
+                    merged.add(ctor.newInstance(target, state, brightness));
+                }
 
                 if (!logged) {
                     logged = true;
                     log(LOG_INFO, TAG,
-                            "ADFR list: injected " + TARGET_GAME
+                            "ADFR list: injected " + missing
                                     + " (peer=" + (peer != null)
                                     + ", state=" + state
                                     + ", brightness=" + brightness
