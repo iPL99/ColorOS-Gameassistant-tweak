@@ -1,4 +1,3 @@
-
 package dev.gyrokr.vectorhook;
 
 import java.lang.reflect.Constructor;
@@ -16,15 +15,12 @@ public class GyroKrModule extends XposedModule {
     private static final String GAME_SPACE = "com.oplus.games";
     private static final String TARGET_GAME = "com.pubg.krmobile";
 
-    private static final String PEER_GAME = "com.pubg.imobile";
-
+    // Hyper Response Engine (ADFR) support list
+    private static final String PEER_GAME = "com.pubg.imobile"; // BGMI: 엔티티 값 복제용
     private static final String ADFR_VIEW_MODEL =
             "com.coloros.gamespaceui.module.adfr.GameAdfrViewModel";
     private static final String ADFR_ENTITY =
             "com.coloros.gamespaceui.module.adfr.db.GameAdfrEntity";
-
-    private static final String FRAME_INSERT_FEATURE =
-            "business.module.frameinsert.FrameInsertFeature";
 
     private static final int LOG_INFO = 4;
     private static final int LOG_ERROR = 6;
@@ -49,14 +45,12 @@ public class GyroKrModule extends XposedModule {
         }
 
         log(LOG_INFO, TAG, "GameSpace detected");
-
         installGyroscopeHooks(loader);
         installHyperResponseHooks(loader);
-        installHyperFrameRateHooks(loader);
     }
 
     // ================================================================
-    // Gyroscope
+    // Gyroscope support hooks
     // ================================================================
 
     private void installGyroscopeHooks(ClassLoader loader) {
@@ -73,15 +67,28 @@ public class GyroKrModule extends XposedModule {
                 String name = method.getName();
                 Class<?>[] params = method.getParameterTypes();
 
-                if (("r".equals(name) || "s".equals(name))
+                // r(String): boolean
+                if ("r".equals(name)
                         && method.getReturnType() == boolean.class
                         && params.length == 1
                         && params[0] == String.class) {
 
                     method.setAccessible(true);
-                    hook(method).intercept(
-                            new GyroGateHooker(name)
-                    );
+                    hook(method).intercept(new GyroGateHooker("r"));
+
+                    log(LOG_INFO, TAG,
+                            "Gyroscope hook INSTALLED: " + method);
+                    installed++;
+                }
+
+                // s(String): boolean
+                else if ("s".equals(name)
+                        && method.getReturnType() == boolean.class
+                        && params.length == 1
+                        && params[0] == String.class) {
+
+                    method.setAccessible(true);
+                    hook(method).intercept(new GyroGateHooker("s"));
 
                     log(LOG_INFO, TAG,
                             "Gyroscope hook INSTALLED: " + method);
@@ -107,8 +114,9 @@ public class GyroKrModule extends XposedModule {
         }
 
         @Override
-        public Object intercept(XposedInterface.Chain chain)
-                throws Throwable {
+        public Object intercept(
+                XposedInterface.Chain chain
+        ) throws Throwable {
 
             Object arg = null;
 
@@ -131,7 +139,13 @@ public class GyroKrModule extends XposedModule {
     }
 
     // ================================================================
-    // Hyper Response Engine (ADFR)
+    // Hyper Response Engine (ADFR support list)
+    //
+    // 하이퍼 리스폰스 섹션은 PerfTouchSettingFragment 에서
+    //   touch.d.e() = GameAdfrFeature 지원 && GameAdfrViewModel.i(현재 게임) != null
+    // 일 때만 만들어진다. i(pkg) 는 GameAdfrViewModel.p() 목록에서
+    // pkgName 이 같은 GameAdfrEntity 를 찾으므로, p() 결과에 한국 PUBG
+    // 엔티티를 추가한다.
     // ================================================================
 
     private void installHyperResponseHooks(ClassLoader loader) {
@@ -143,7 +157,6 @@ public class GyroKrModule extends XposedModule {
             Method getState = entity.getDeclaredMethod("getState");
             Method getBrightness =
                     entity.getDeclaredMethod("getBrightnessThreshold");
-
             Constructor<?> ctor = entity.getDeclaredConstructor(
                     String.class, int.class, int.class);
 
@@ -152,27 +165,19 @@ public class GyroKrModule extends XposedModule {
             getBrightness.setAccessible(true);
             ctor.setAccessible(true);
 
-            log(LOG_INFO, TAG,
-                    "GameAdfrViewModel / GameAdfrEntity FOUND");
+            log(LOG_INFO, TAG, "GameAdfrViewModel / GameAdfrEntity FOUND");
 
             int installed = 0;
 
             for (Method method : viewModel.getDeclaredMethods()) {
+                // p(): List<GameAdfrEntity>  (지원 ADFR 게임 목록)
                 if ("p".equals(method.getName())
                         && method.getParameterCount() == 0
-                        && List.class.isAssignableFrom(
-                                method.getReturnType())) {
+                        && List.class.isAssignableFrom(method.getReturnType())) {
 
                     method.setAccessible(true);
-
-                    hook(method).intercept(
-                            new AdfrListHooker(
-                                    getPkgName,
-                                    getState,
-                                    getBrightness,
-                                    ctor
-                            )
-                    );
+                    hook(method).intercept(new AdfrListHooker(
+                            getPkgName, getState, getBrightness, ctor));
 
                     log(LOG_INFO, TAG,
                             "ADFR list hook INSTALLED: " + method);
@@ -197,15 +202,10 @@ public class GyroKrModule extends XposedModule {
         private final Method getState;
         private final Method getBrightness;
         private final Constructor<?> ctor;
-
         private boolean logged = false;
 
-        AdfrListHooker(
-                Method getPkgName,
-                Method getState,
-                Method getBrightness,
-                Constructor<?> ctor) {
-
+        AdfrListHooker(Method getPkgName, Method getState,
+                       Method getBrightness, Constructor<?> ctor) {
             this.getPkgName = getPkgName;
             this.getState = getState;
             this.getBrightness = getBrightness;
@@ -213,8 +213,9 @@ public class GyroKrModule extends XposedModule {
         }
 
         @Override
-        public Object intercept(XposedInterface.Chain chain)
-                throws Throwable {
+        public Object intercept(
+                XposedInterface.Chain chain
+        ) throws Throwable {
 
             Object result = chain.proceed();
 
@@ -230,21 +231,20 @@ public class GyroKrModule extends XposedModule {
                     if (item == null) {
                         continue;
                     }
-
                     String pkg = (String) getPkgName.invoke(item);
 
                     if (TARGET_GAME.equals(pkg)) {
+                        // 이미 목록에 있으면 그대로 사용
                         return result;
                     }
-
                     if (PEER_GAME.equals(pkg)) {
                         peer = item;
                     }
                 }
 
+                // BGMI 엔티티가 있으면 값을 복제, 없으면 기본 JSON 값(0, -1) 사용
                 int state = 0;
                 int brightness = -1;
-
                 if (peer != null) {
                     state = (Integer) getState.invoke(peer);
                     brightness = (Integer) getBrightness.invoke(peer);
@@ -253,15 +253,12 @@ public class GyroKrModule extends XposedModule {
                 Object injected = ctor.newInstance(
                         TARGET_GAME, state, brightness);
 
-                List<Object> merged =
-                        new ArrayList<>(source.size() + 1);
-
+                List<Object> merged = new ArrayList<>(source.size() + 1);
                 merged.addAll(source);
                 merged.add(injected);
 
                 if (!logged) {
                     logged = true;
-
                     log(LOG_INFO, TAG,
                             "ADFR list: injected " + TARGET_GAME
                                     + " (peer=" + (peer != null)
@@ -273,80 +270,9 @@ public class GyroKrModule extends XposedModule {
                 return merged;
 
             } catch (Throwable e) {
-                log(LOG_ERROR, TAG,
-                        "ADFR list inject ERROR: " + e);
+                log(LOG_ERROR, TAG, "ADFR list inject ERROR: " + e);
                 return result;
             }
-        }
-    }
-
-    // ================================================================
-    // Hyper Frame Rate
-    // ================================================================
-
-    private void installHyperFrameRateHooks(ClassLoader loader) {
-        try {
-            Class<?> clazz = loader.loadClass(FRAME_INSERT_FEATURE);
-
-            log(LOG_INFO, TAG, "FrameInsertFeature FOUND");
-
-            int installed = 0;
-
-            for (Method method : clazz.getDeclaredMethods()) {
-
-                if ("isFeatureEnabled".equals(method.getName())
-                        && method.getReturnType() == boolean.class
-                        && method.getParameterCount() == 1
-                        && method.getParameterTypes()[0] == String.class) {
-
-                    method.setAccessible(true);
-
-                    hook(method).intercept(
-                            new HyperFrameRateHooker()
-                    );
-
-                    log(LOG_INFO, TAG,
-                            "HYPER FRAME RATE hook INSTALLED: " + method);
-
-                    installed++;
-                }
-            }
-
-            if (installed == 0) {
-                log(LOG_ERROR, TAG,
-                        "HYPER FRAME RATE hook NOT INSTALLED: method not found");
-            }
-
-        } catch (Throwable e) {
-            log(LOG_ERROR, TAG,
-                    "HYPER FRAME RATE hook ERROR: " + e);
-        }
-    }
-
-    private class HyperFrameRateHooker
-            implements XposedInterface.Hooker {
-
-        private boolean logged = false;
-
-        @Override
-        public Object intercept(XposedInterface.Chain chain)
-                throws Throwable {
-
-            Object arg = null;
-
-            if (chain.getExecutable().getParameterCount() > 0) {
-                arg = chain.getArg(0);
-            }
-
-            if (!logged) {
-                logged = true;
-
-                log(LOG_INFO, TAG,
-                        "HYPER FRAME RATE HIT: isFeatureEnabled("
-                                + arg + ") -> true");
-            }
-
-            return Boolean.TRUE;
         }
     }
 }
