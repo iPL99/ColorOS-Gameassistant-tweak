@@ -29,6 +29,44 @@ Requirements
 - ColorOS / OPlus 기반 기기
 - OPlus Game Assistant / Game Space
 
+Supported Games
+
+기본으로 포함된 패키지 (별도 설정 불필요):
+
+- com.pubg.krmobile (배틀그라운드 모바일, 한국)
+- com.tencent.ig (PUBG MOBILE, 글로벌)
+- com.rekoo.pubgm (PUBG MOBILE, 대만)
+- com.vng.pubgmobile (PUBG MOBILE, 베트남)
+
+Adding More Games
+
+코드를 수정하거나 다시 빌드하지 않아도, 설정 파일로 대상 게임을 추가할 수 있습니다.
+
+1. 루트 권한 파일 매니저로 아래 경로에 gyrokr_packages.txt 파일을 만듭니다.
+
+   /sdcard/Android/data/com.oplus.games/files/gyrokr_packages.txt
+
+   (위 경로를 읽지 못하는 기기에서는 /data/data/com.oplus.games/files/gyrokr_packages.txt 도 확인합니다. 이 경로는 파일 소유자를 게임 어시스턴트 앱으로 맞춰야 합니다.)
+
+2. 한 줄에 패키지명 하나를 적습니다. # 뒤는 주석입니다.
+
+   com.pubg.imobile   # 예시
+   com.example.game
+
+3. 저장하면 약 3초 안에 자동으로 반영됩니다. 게임 어시스턴트를 다시 시작할 필요는 없습니다. 하이퍼 리스폰스 목록은 설정 화면을 다시 열어야 반영될 수 있습니다.
+
+기본 목록은 파일 없이도 항상 포함되며, 파일에 적은 패키지는 그 위에 더해집니다.
+
+패키지명 확인 방법
+
+- 설정 > 앱 > 해당 앱 > 앱 정보 화면 (기기에 따라 표시되지 않을 수 있음)
+- adb shell pm list packages | grep 게임이름
+- Play 스토어 웹 주소의 id= 뒤 값
+
+동작 확인
+
+logcat에서 OplusGyroKR 태그를 확인합니다. 설정 파일이 읽히면 target games = [...] 로그에 추가한 패키지가 나타납니다. 파일을 읽지 못하면 config read ERROR 로그가 남습니다.
+
 Compatibility
 
 ColorOS 및 OPlus Game Assistant의 내부 구현에 의존합니다.
