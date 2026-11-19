@@ -1,5 +1,9 @@
 package dev.gyrokr.vectorhook;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStreamReader;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -18,14 +22,78 @@ public class GyroKrModule extends XposedModule {
     private static final String TAG = "OplusGyroKR";
     private static final String GAME_SPACE = "com.oplus.games";
 
-    // 자이로 / 하이퍼 리스폰스를 강제로 활성화할 게임 패키지 목록.
-    // 다른 게임/지역판을 추가하려면 여기에 패키지명만 한 줄 추가하면 된다.
-    private static final Set<String> TARGET_GAMES = new LinkedHashSet<>(Arrays.asList(
+    // 기본 대상 게임 패키지 목록 (파일 없이도 항상 포함됨)
+    private static final Set<String> DEFAULT_TARGET_GAMES = new LinkedHashSet<>(Arrays.asList(
             "com.pubg.krmobile",   // 배틀그라운드 모바일 (한국)
             "com.tencent.ig",      // PUBG MOBILE (글로벌)
             "com.rekoo.pubgm",     // PUBG MOBILE (대만)
             "com.vng.pubgmobile"   // PUBG MOBILE (베트남)
     ));
+
+    // 사용자 추가 패키지 파일: 한 줄에 패키지명 하나, '#' 으로 시작하면 주석.
+    // 게임 어시스턴트 프로세스가 자기 권한으로 읽을 수 있는 경로 두 곳을 모두 확인한다.
+    private static final String[] CONFIG_PATHS = {
+            "/sdcard/Android/data/com.oplus.games/files/gyrokr_packages.txt",
+            "/data/data/com.oplus.games/files/gyrokr_packages.txt"
+    };
+    private static final long RELOAD_INTERVAL_MS = 3000;
+
+    private volatile Set<String> cachedTargets = DEFAULT_TARGET_GAMES;
+    private volatile long lastCheckMs = 0;
+    private volatile String lastSignature = "";
+
+    /** 기본 목록 + 설정 파일 목록. 파일이 바뀌면 자동으로 다시 읽는다. */
+    private Set<String> getTargetGames() {
+        long now = System.currentTimeMillis();
+        if (now - lastCheckMs < RELOAD_INTERVAL_MS) {
+            return cachedTargets;
+        }
+        lastCheckMs = now;
+
+        try {
+            StringBuilder signature = new StringBuilder();
+            for (String path : CONFIG_PATHS) {
+                File f = new File(path);
+                signature.append(path).append(':')
+                        .append(f.isFile() ? f.lastModified() + "/" + f.length() : "-")
+                        .append(';');
+            }
+            if (signature.toString().equals(lastSignature)) {
+                return cachedTargets;
+            }
+
+            Set<String> merged = new LinkedHashSet<>(DEFAULT_TARGET_GAMES);
+            for (String path : CONFIG_PATHS) {
+                File f = new File(path);
+                if (!f.isFile() || !f.canRead()) {
+                    continue;
+                }
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(new FileInputStream(f), "UTF-8"))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        int hash = line.indexOf('#');
+                        if (hash >= 0) {
+                            line = line.substring(0, hash);
+                        }
+                        line = line.trim();
+                        if (!line.isEmpty()) {
+                            merged.add(line);
+                        }
+                    }
+                } catch (Throwable e) {
+                    log(LOG_ERROR, TAG, "config read ERROR (" + path + "): " + e);
+                }
+            }
+
+            lastSignature = signature.toString();
+            cachedTargets = merged;
+            log(LOG_INFO, TAG, "target games = " + merged);
+        } catch (Throwable e) {
+            log(LOG_ERROR, TAG, "config load ERROR: " + e);
+        }
+        return cachedTargets;
+    }
 
     // Hyper Response Engine (ADFR) support list
     private static final String PEER_GAME = "com.pubg.imobile"; // BGMI: 엔티티 값 복제용
@@ -138,7 +206,7 @@ public class GyroKrModule extends XposedModule {
 
             String packageName = String.valueOf(arg);
 
-            if (TARGET_GAMES.contains(packageName)) {
+            if (getTargetGames().contains(packageName)) {
                 log(LOG_INFO, TAG,
                         "GYRO TARGET HIT: " + methodName
                                 + "(" + packageName + ") -> true");
@@ -254,7 +322,7 @@ public class GyroKrModule extends XposedModule {
 
                 // 목록에 아직 없는 대상 게임만 추가
                 List<String> missing = new ArrayList<>();
-                for (String target : TARGET_GAMES) {
+                for (String target : getTargetGames()) {
                     if (!existing.contains(target)) {
                         missing.add(target);
                     }
